@@ -1,0 +1,327 @@
+commit c7d7c5acd0c14d0450016887cba1d86483086794
+Author: Michal Domonkos <mdomonko@redhat.com>
+Date:   Mon Jun 21 10:05:10 2021 +0200
+
+    Add quoting to literal curly brackets
+    
+    These curly brackets are already treated as literals by the shell, so
+    let's make that explicit for clarity, and silence a ShellCheck warning
+    at the same time.
+    
+    More info: https://github.com/koalaman/shellcheck/wiki/SC1083
+    
+    Found by ShellCheck.
+
+diff -up rpm-4.16.1.3/scripts/check-rpaths-worker.orig rpm-4.16.1.3/scripts/check-rpaths-worker
+--- rpm-4.16.1.3/scripts/check-rpaths-worker.orig	2021-06-29 15:34:31.671003589 +0200
++++ rpm-4.16.1.3/scripts/check-rpaths-worker	2021-06-29 15:34:51.993414093 +0200
+@@ -120,13 +120,13 @@ for i; do
+ 	        (/lib64/*|/usr/lib64/*|/usr/X11R6/lib64/*|/usr/local/lib64/*)
+ 		    badness=0;;
+ 
+-		(\$ORIGIN|\${ORIGINX}|\$ORIGIN/*|\${ORIGINX}/*)
++		(\$ORIGIN|\$\{ORIGINX\}|\$ORIGIN/*|\$\{ORIGINX\}/*)
+ 		    test $allow_ORIGIN -eq 0 && badness=8 || {
+ 			badness=0
+ 			new_allow_ORIGIN=1
+ 		    }
+ 		    ;;
+-		(/*\$PLATFORM*|/*\${PLATFORM}*|/*\$LIB*|/*\${LIB}*)
++		(/*\$PLATFORM*|/*\$\{PLATFORM\}*|/*\$LIB*|/*\$\{LIB\}*)
+ 		    badness=0;;
+ 	    	
+ 	        (/lib|/usr/lib|/usr/X11R6/lib)
+From d8dc4fd37b1d90cd97de7fcf484d449ec132c9b3 Mon Sep 17 00:00:00 2001
+From: Michal Domonkos <mdomonko@redhat.com>
+Date: Wed, 9 Jun 2021 21:31:40 +0200
+Subject: [PATCH 1/7] Fix memory leak in sqlexec()
+
+Callers are supposed to free the error strings themselves:
+https://www.sqlite.org/capi3ref.html#sqlite3_exec
+
+Found by Coverity.
+---
+ lib/backend/sqlite.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/lib/backend/sqlite.c b/lib/backend/sqlite.c
+index 7c2de45aa..dbefeb163 100644
+--- a/lib/backend/sqlite.c
++++ b/lib/backend/sqlite.c
+@@ -233,6 +233,7 @@ static int sqlexec(sqlite3 *sdb, const char *fmt, ...)
+ 	rpmlog(RPMLOG_DEBUG, "%s: %d\n", cmd, rc);
+ 
+     sqlite3_free(cmd);
++    sqlite3_free(err);
+ 
+     return rc ? RPMRC_FAIL : RPMRC_OK;
+ }
+-- 
+2.31.1
+
+From 5baf73feb4951cc3b3f553a4b18d3b3599cbf87c Mon Sep 17 00:00:00 2001
+From: Michal Domonkos <mdomonko@redhat.com>
+Date: Fri, 25 Jun 2021 11:21:46 +0200
+Subject: [PATCH 2/7] Always free the arg list passed to rpmGlob()
+
+Even though the actual implementation of rpmGlob() does not allocate the
+passed arg list (av) if the return code (rc) is non-zero or arg count
+(ac) is 0, it's the responsibility of the caller (rpmInstall() here) to
+free that memory, so make sure we do that irrespectively of the above
+conditions.
+
+Found by Coverity.
+---
+ lib/rpminstall.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/lib/rpminstall.c b/lib/rpminstall.c
+index 724126e94..302ec0ba1 100644
+--- a/lib/rpminstall.c
++++ b/lib/rpminstall.c
+@@ -461,6 +461,7 @@ int rpmInstall(rpmts ts, struct rpmInstallArguments_s * ia, ARGV_t fileArgv)
+ 		rpmlog(RPMLOG_ERR, _("File not found by glob: %s\n"), *eiu->fnp);
+ 	    }
+ 	    eiu->numFailed++;
++	    argvFree(av);
+ 	    continue;
+ 	}
+ 
+-- 
+2.31.1
+
+From 3c8b01b67ec907afaaffe71691fa41b878578527 Mon Sep 17 00:00:00 2001
+From: Michal Domonkos <mdomonko@redhat.com>
+Date: Mon, 14 Jun 2021 10:21:25 +0200
+Subject: [PATCH 3/7] Fix resource leak in Fts_children()
+
+This function is not used anywhere within our codebase (and neither is
+it part of the public API) so it's basically a no-op... Still, rather
+than yanking it completely, let's just silence the Coverity error here.
+
+Found by Coverity.
+---
+ misc/fts.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/misc/fts.c b/misc/fts.c
+index d3ebb2946..caf27495d 100644
+--- a/misc/fts.c
++++ b/misc/fts.c
+@@ -585,8 +585,10 @@ Fts_children(FTS * sp, int instr)
+ 	if ((fd = __open(".", O_RDONLY, 0)) < 0)
+ 		return (NULL);
+ 	sp->fts_child = fts_build(sp, instr);
+-	if (__fchdir(fd))
++	if (__fchdir(fd)) {
++		(void)__close(fd);
+ 		return (NULL);
++	}
+ 	(void)__close(fd);
+ 	return (sp->fts_child);
+ }
+-- 
+2.31.1
+
+From 39b7bf8579e0522cf16347b3a7e332d3b6d742c6 Mon Sep 17 00:00:00 2001
+From: Michal Domonkos <mdomonko@redhat.com>
+Date: Mon, 14 Jun 2021 12:34:23 +0200
+Subject: [PATCH 4/7] Fix memory leak in fts_build()
+
+Turns out this leak is already fixed in glibc's current version of fts.c
+(where our copy originates from), so let's just backport that.
+
+Original commit in glibc:
+https://sourceware.org/git/?p=glibc.git;\
+a=commit;h=db67c2c98b89a5723af44df54f38b779de8d4a65
+
+Found by Coverity.
+---
+ misc/fts.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/misc/fts.c b/misc/fts.c
+index caf27495d..f7fce0eaa 100644
+--- a/misc/fts.c
++++ b/misc/fts.c
+@@ -855,6 +855,7 @@ mem1:				saved_errno = errno;
+ 	     fts_safe_changedir(sp, cur->fts_parent, -1, ".."))) {
+ 		cur->fts_info = FTS_ERR;
+ 		SET(FTS_STOP);
++		fts_lfree(head);
+ 		return (NULL);
+ 	}
+ 
+@@ -862,6 +863,7 @@ mem1:				saved_errno = errno;
+ 	if (!nitems) {
+ 		if (type == BREAD)
+ 			cur->fts_info = FTS_DP;
++		fts_lfree(head);
+ 		return (NULL);
+ 	}
+ 
+-- 
+2.31.1
+
+From 9c093c4f092dd6bd1e0c8d2b852a72b74db076c2 Mon Sep 17 00:00:00 2001
+From: Michal Domonkos <mdomonko@redhat.com>
+Date: Tue, 15 Jun 2021 13:34:21 +0200
+Subject: [PATCH 5/7] Fix memory leak in decodePkts()
+
+Found by Coverity.
+---
+ rpmio/rpmpgp.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/rpmio/rpmpgp.c b/rpmio/rpmpgp.c
+index c59185dce..ee5c81e24 100644
+--- a/rpmio/rpmpgp.c
++++ b/rpmio/rpmpgp.c
+@@ -1371,9 +1371,13 @@ static pgpArmor decodePkts(uint8_t *b, uint8_t **pkt, size_t *pktlen)
+ 	    crc = pgpCRC(dec, declen);
+ 	    if (crcpkt != crc) {
+ 		ec = PGPARMOR_ERR_CRC_CHECK;
++		_free(dec);
+ 		goto exit;
+ 	    }
+-	    if (pkt) *pkt = dec;
++	    if (pkt)
++		*pkt = dec;
++	    else
++		_free(dec);
+ 	    if (pktlen) *pktlen = declen;
+ 	    ec = PGPARMOR_PUBKEY;	/* XXX ASCII Pubkeys only, please. */
+ 	    goto exit;
+-- 
+2.31.1
+
+From 590b2fc06252567eb7d57197dc361a8b459d62a3 Mon Sep 17 00:00:00 2001
+From: Michal Domonkos <mdomonko@redhat.com>
+Date: Mon, 21 Jun 2021 17:51:14 +0200
+Subject: [PATCH 6/7] Fix memory leak with multiple %lang-s in one line
+
+We permit two equivalent forms of specifying a list of languages per
+file:
+
+  %lang(xx,yy,zz) /path/to/file
+  %lang(xx) %lang(yy) %lang(zz) /path/to/file
+
+The leak was when parsing the second form.
+
+Found by Coverity.
+---
+ build/files.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/build/files.c b/build/files.c
+index f8153ad2b..0c8859f6c 100644
+--- a/build/files.c
++++ b/build/files.c
+@@ -777,6 +777,8 @@ static rpmRC parseForLang(char * buf, FileEntry cur)
+ 
+ 	if (*pe == ',') pe++;	/* skip , if present */
+     }
++
++    q = _free(q);
+   }
+ 
+     rc = RPMRC_OK;
+-- 
+2.31.1
+
+From b7a1e996326ee29a163d67ceb1e6127fdc251c14 Mon Sep 17 00:00:00 2001
+From: Michal Domonkos <mdomonko@redhat.com>
+Date: Fri, 25 Jun 2021 15:15:08 +0200
+Subject: [PATCH 7/7] Fix memory leaks in Lua rex extension
+
+This covers the following usage:
+
+expr = rex.newPOSIX(<regex>)
+expr:match(<string>)           # A leak occurred here
+expr:gmatch(<string>, <func>)  # A leak occurred here
+
+Found by Coverity.
+---
+ luaext/lrexlib.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/luaext/lrexlib.c b/luaext/lrexlib.c
+index 09c5a6454..0f29b6371 100644
+--- a/luaext/lrexlib.c
++++ b/luaext/lrexlib.c
+@@ -80,6 +80,7 @@ static void rex_push_matches(lua_State *L, const char *text, regmatch_t *match,
+ 
+ static int rex_match(lua_State *L)
+ {
++  int rc = 0;
+   int res;
+ #ifdef REG_BASIC
+   size_t len;
+@@ -109,9 +110,10 @@ static int rex_match(lua_State *L)
+     lua_pushstring(L, "n");
+     lua_pushnumber(L, ncapt);
+     lua_rawset(L, -3);
+-    return 3;
+-  } else
+-    return 0;
++    rc = 3;
++  }
++  free(match);
++  return rc;
+ }
+ 
+ static int rex_gmatch(lua_State *L)
+@@ -158,6 +160,7 @@ static int rex_gmatch(lua_State *L)
+       break;
+   }
+   lua_pushnumber(L, nmatch);
++  free(match);
+   return 1;
+ }
+ 
+-- 
+2.31.1
+
+commit 9747a6af016a3458d54fe060777c95e3900b5fa4
+Author: Demi Marie Obenour <athena@invisiblethingslab.com>
+Date:   Tue Mar 2 12:47:29 2021 -0500
+
+    Fix a tiny memory leak
+    
+    Found by fuzzing rpmReadPackageFile() with libfuzzer under ASAN.
+
+diff --git a/lib/headerutil.c b/lib/headerutil.c
+index 22e36c74d..fab210ff2 100644
+--- a/lib/headerutil.c
++++ b/lib/headerutil.c
+@@ -333,8 +333,10 @@ static void providePackageNVR(Header h)
+     rpmds hds, nvrds;
+ 
+     /* Generate provides for this package name-version-release. */
+-    if (!(name && pEVR))
++    if (!(name && pEVR)) {
++	free(pEVR);
+ 	return;
++    }
+ 
+     /*
+      * Rpm prior to 3.0.3 does not have versioned provides.
+commit cb2ae4bdf2f60876fdc68e3f84938e9c37182fab
+Author: Igor Gnatenko <i.gnatenko.brain@gmail.com>
+Date:   Tue Feb 6 14:50:27 2018 +0100
+
+    lua: fix memory leak in Pexec()
+    
+    Signed-off-by: Igor Gnatenko <i.gnatenko.brain@gmail.com>
+
+diff --git a/luaext/lposix.c b/luaext/lposix.c
+index 5d7ad3c87..2730bcff7 100644
+--- a/luaext/lposix.c
++++ b/luaext/lposix.c
+@@ -348,6 +348,7 @@ static int Pexec(lua_State *L)			/** exec(path,[args]) */
+ 	for (i=1; i<n; i++) argv[i] = (char*)luaL_checkstring(L, i+1);
+ 	argv[i] = NULL;
+ 	execvp(path,argv);
++	free(argv);
+ 	return pusherror(L, path);
+ }

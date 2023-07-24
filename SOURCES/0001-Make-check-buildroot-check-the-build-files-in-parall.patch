@@ -1,0 +1,31 @@
+From f23af97c4135013d3134a17c881014fb6e9589c8 Mon Sep 17 00:00:00 2001
+From: Florian Festi <ffesti@redhat.com>
+Date: Tue, 30 Apr 2019 17:12:35 +0200
+Subject: [PATCH] Make check-buildroot check the build files in parallel
+
+Thanks to Denys Vlasenko for pointing this out in rhbz#1704353
+---
+ scripts/check-buildroot | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/scripts/check-buildroot b/scripts/check-buildroot
+index 0cfb34f39..f91dc767b 100755
+--- a/scripts/check-buildroot
++++ b/scripts/check-buildroot
+@@ -24,11 +24,12 @@ fi
+ 
+ tmp=$(mktemp ${TMPDIR:-/tmp}/cbr.XXXXXX)
+ trap "rm -f $tmp" EXIT
++NCPUS=${RPM_BUILD_NCPUS:-1}
+ 
+ find "$RPM_BUILD_ROOT" \! \( \
+     -name '*.pyo' -o -name '*.pyc' -o -name '*.elc' -o -name '.packlist' \
+     \) -type f -print0 | \
+-    LANG=C xargs -0r grep -F "$RPM_BUILD_ROOT" >$tmp
++    LANG=C xargs -0r -P$NCPUS -n16 grep -F "$RPM_BUILD_ROOT" >>$tmp
+ 
+ test -s "$tmp" && {
+     cat "$tmp"
+-- 
+2.21.0
+

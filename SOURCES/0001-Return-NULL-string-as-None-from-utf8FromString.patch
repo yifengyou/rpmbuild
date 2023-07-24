@@ -1,0 +1,41 @@
+From aea53a4aead8bd71f519df35fcffd9eec76fbc01 Mon Sep 17 00:00:00 2001
+Message-Id: <aea53a4aead8bd71f519df35fcffd9eec76fbc01.1554884465.git.pmatilai@redhat.com>
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Tue, 26 Feb 2019 11:27:51 +0200
+Subject: [PATCH] Return NULL string as None from utf8FromString()
+
+Commit 84920f898315d09a57a3f1067433eaeb7de5e830 regressed dnf install
+to segfault at the end due to some NULL string passed to strlen().
+Check for NULL and return it as None, make it an inline function
+to make this saner.
+---
+ python/rpmsystem-py.h | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/python/rpmsystem-py.h b/python/rpmsystem-py.h
+index 87c750571..25938464a 100644
+--- a/python/rpmsystem-py.h
++++ b/python/rpmsystem-py.h
+@@ -19,11 +19,17 @@
+ #define PyInt_AsSsize_t PyLong_AsSsize_t
+ #endif
+ 
++static inline PyObject * utf8FromString(const char *s)
++{
+ /* In Python 3, we return all strings as surrogate-escaped utf-8 */
+ #if PY_MAJOR_VERSION >= 3
+-#define utf8FromString(_s) PyUnicode_DecodeUTF8(_s, strlen(_s), "surrogateescape")
++    if (s != NULL)
++	return PyUnicode_DecodeUTF8(s, strlen(s), "surrogateescape");
+ #else
+-#define utf8FromString(_s) PyBytes_FromString(_s)
++    if (s != NULL)
++	return PyBytes_FromString(s);
+ #endif
++    Py_RETURN_NONE;
++}
+ 
+ #endif	/* H_SYSTEM_PYTHON */
+-- 
+2.20.1
+

@@ -1,0 +1,28 @@
+From 57b4f21634429ccd29d47cf93ec0841f70b68404 Mon Sep 17 00:00:00 2001
+Message-Id: <57b4f21634429ccd29d47cf93ec0841f70b68404.1545311826.git.pmatilai@redhat.com>
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Tue, 18 Sep 2018 11:02:36 +0300
+Subject: [PATCH] Mark elements with associated problems as failed
+
+An element with a problem can not possibly succeed so mark these failures
+early. Doesn't make much of a difference as problems will prevent the
+transaction from starting in the first place but it makes sense anyway.
+---
+ lib/rpmte.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/lib/rpmte.c b/lib/rpmte.c
+index 4bdeeaf68..c5d614f67 100644
+--- a/lib/rpmte.c
++++ b/lib/rpmte.c
+@@ -703,6 +703,7 @@ static void appendProblem(rpmte te, rpmProblemType type,
+ 	if (te->probs == NULL)
+ 	    te->probs = rpmpsCreate();
+ 	rpmpsAppendProblem(te->probs, p);
++	rpmteMarkFailed(te);
+     }
+     rpmProblemFree(p);
+ }
+-- 
+2.19.2
+

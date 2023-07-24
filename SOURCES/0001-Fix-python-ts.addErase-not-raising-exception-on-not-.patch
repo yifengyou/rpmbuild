@@ -1,0 +1,102 @@
+From 60066aba510b3ff4a7db092021aae71948e3f8be Mon Sep 17 00:00:00 2001
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Thu, 4 Jun 2020 11:18:01 +0300
+Subject: [PATCH] Fix python ts.addErase() not raising exception on not-found
+ packages
+
+The code would only raise an exception if TransactionSetCore.addErase()
+returned an error, but the catch is that with many kinds of argument
+types we'd silently skip the whole addition because no headers were found.
+This looks to be a regression introduced some eleven years ago in
+commit 9b20c706a4f93266450fae2f94007343b2e8fd9e.
+
+As a special case, a match iterator argument will not raise an exception
+if it doesn't actually match anything.
+
+Fixes: #1214
+---
+ python/rpm/transaction.py | 26 +++++++++++++++-----------
+ tests/rpmpython.at        | 22 ++++++++++++++++++++++
+ 2 files changed, 37 insertions(+), 11 deletions(-)
+
+diff --git a/python/rpm/transaction.py b/python/rpm/transaction.py
+index 7c4a551d3..3c9ddb207 100644
+--- a/python/rpm/transaction.py
++++ b/python/rpm/transaction.py
+@@ -91,14 +91,22 @@ class TransactionSet(TransactionSetCore):
+ 
+     def addErase(self, item):
+         hdrs = []
+-        if isinstance(item, rpm.hdr):
+-            hdrs = [item]
+-        elif isinstance(item, rpm.mi):
++        # match iterators are passed on as-is
++        if isinstance(item, rpm.mi):
+             hdrs = item
+-        elif isinstance(item, int):
+-            hdrs = self.dbMatch(rpm.RPMDBI_PACKAGES, item)
+-        elif isinstance(item, _string_types):
+-            hdrs = self.dbMatch(rpm.RPMDBI_LABEL, item)
++        elif isinstance(item, rpm.hdr):
++            hdrs.append(item)
++        elif isinstance(item, (int, _string_types)):
++            if isinstance(item, int):
++                dbi = rpm.RPMDBI_PACKAGES
++            else:
++                dbi = rpm.RPMDBI_LABEL
++
++            for h in self.dbMatch(dbi, item):
++                hdrs.append(h)
++
++            if not hdrs:
++                raise rpm.error("package not installed")
+         else:
+             raise TypeError("invalid type %s" % type(item))
+ 
+@@ -106,10 +114,6 @@ class TransactionSet(TransactionSetCore):
+             if not TransactionSetCore.addErase(self, h):
+                 raise rpm.error("package not installed")
+ 
+-        # garbage collection should take care but just in case...
+-        if isinstance(hdrs, rpm.mi):
+-            del hdrs
+-
+     def run(self, callback, data):
+         rc = TransactionSetCore.run(self, callback, data, self._probFilter)
+ 
+diff --git a/tests/rpmpython.at b/tests/rpmpython.at
+index 3a7c251f1..de39c8417 100644
+--- a/tests/rpmpython.at
++++ b/tests/rpmpython.at
+@@ -201,6 +201,28 @@ for e in ts:
+ [foo-1.0-1.noarch]
+ )
+ 
++RPMPY_TEST([add erasure to transaction],[
++ts = rpm.ts()
++for i in ['foo', 1234]:
++    myprint('addErase %s' % i)
++    try:
++        ts.addErase(i)
++    except rpm.error as err:
++        myprint(err)
++myprint('addErase mi')
++mi = ts.dbMatch('name', 'foo')
++try:
++    ts.addErase(mi)
++except rpm.error as err:
++    myprint(err)
++],
++[addErase foo
++package not installed
++addErase 1234
++package not installed
++addErase mi]
++)
++
+ RPMPY_TEST([add bogus package to transaction 1],[
+ ts = rpm.ts()
+ h = rpm.hdr()
+-- 
+2.26.2
+

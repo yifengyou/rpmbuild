@@ -1,0 +1,27 @@
+From d97d7b71de158660eb96b4f11d40b6626b85521a Mon Sep 17 00:00:00 2001
+From: Florian Festi <ffesti@redhat.com>
+Date: Tue, 16 Apr 2019 09:50:57 +0200
+Subject: [PATCH] Pass RPM_BUILD_NCPUS to build scripts
+
+Use %_smp_build_ncpus instead of the initial value
+---
+ macros.in | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/macros.in b/macros.in
+index fc587997d..a15e46f26 100644
+--- a/macros.in
++++ b/macros.in
+@@ -807,7 +807,8 @@ package or when debugging this package.\
+   RPM_OPT_FLAGS=\"%{optflags}\"\
+   RPM_ARCH=\"%{_arch}\"\
+   RPM_OS=\"%{_os}\"\
+-  export RPM_SOURCE_DIR RPM_BUILD_DIR RPM_OPT_FLAGS RPM_ARCH RPM_OS\
++  RPM_BUILD_NCPUS=\"%{_smp_build_ncpus}\"\
++  export RPM_SOURCE_DIR RPM_BUILD_DIR RPM_OPT_FLAGS RPM_ARCH RPM_OS RPM_BUILD_NCPUS\
+   RPM_DOC_DIR=\"%{_docdir}\"\
+   export RPM_DOC_DIR\
+   RPM_PACKAGE_NAME=\"%{NAME}\"\
+-- 
+2.21.0
+

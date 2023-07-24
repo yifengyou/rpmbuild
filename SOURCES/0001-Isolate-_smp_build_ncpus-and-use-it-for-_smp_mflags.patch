@@ -1,0 +1,41 @@
+From e811c7ec0b4d2685b63b61803e3952466b1a4ac6 Mon Sep 17 00:00:00 2001
+Message-Id: <e811c7ec0b4d2685b63b61803e3952466b1a4ac6.1574335619.git.pmatilai@redhat.com>
+From: marxin <mliska@suse.cz>
+Date: Wed, 28 Nov 2018 10:52:01 +0100
+Subject: [PATCH] Isolate %_smp_build_ncpus and use it for %_smp_mflags.
+
+Refactor _smp_build_ncpus and use it in %_smp_mflags. Note that now
+having a single CPU, %_smp_mflags is expanded to '-j1'.
+
+XXX: hand-edited to remove double quotes as per upstream commit
+     9b6fdc65ef0507fff04a69c88e085a7a26711839 which isn't applicable
+     directly due to other changes
+
+---
+ platform.in | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/platform.in b/platform.in
+index 3eb67b55b..2dd951f87 100644
+--- a/platform.in
++++ b/platform.in
+@@ -50,11 +50,14 @@
+ 
+ # Maximum number of CPU's to use when building, 0 for unlimited.
+ #%_smp_ncpus_max 0
+-%_smp_mflags %([ -z "$RPM_BUILD_NCPUS" ] \\\
++
++%_smp_build_ncpus %([ -z "$RPM_BUILD_NCPUS" ] \\\
+ 	&& RPM_BUILD_NCPUS="`/usr/bin/getconf _NPROCESSORS_ONLN`"; \\\
+         ncpus_max=%{?_smp_ncpus_max}; \\\
+         if [ -n "$ncpus_max" ] && [ "$ncpus_max" -gt 0 ] && [ "$RPM_BUILD_NCPUS" -gt "$ncpus_max" ]; then RPM_BUILD_NCPUS="$ncpus_max"; fi; \\\
+-        if [ "$RPM_BUILD_NCPUS" -gt 1 ]; then echo "-j$RPM_BUILD_NCPUS"; fi)
++        echo "$RPM_BUILD_NCPUS";)
++
++%_smp_mflags -j%{_smp_build_ncpus}
+ 
+ #==============================================================================
+ # ---- Build policy macros.
+-- 
+2.23.0
+

@@ -1,0 +1,41 @@
+From 1fd84fa0cfa6e493d1c15edfb7d9f0bb05e4f920 Mon Sep 17 00:00:00 2001
+From: Florian Festi <ffesti@redhat.com>
+Date: Thu, 2 May 2019 17:17:56 +0200
+Subject: [PATCH] Fix brp-strip-static-archive parallelism
+
+The change made in fc2c986 can break for large values of %_smp_build_ncpus as
+this many processes are able to overflow the following pipe.
+
+Thanks to Denys Vlasenko for testing this.
+
+This change solves this problem by running a whole processing pileline for each
+parallel (file) process. This has also the benefit of running at least some
+stip commands in parallel.
+
+The -n param fro xargs was increased to 32 to further reduce the over head of
+spawing the helpers as they are now needed for each run of the file command.
+---
+ scripts/brp-strip-static-archive | 10 +++-------
+ 1 file changed, 3 insertions(+), 7 deletions(-)
+
+diff --git a/scripts/brp-strip-static-archive b/scripts/brp-strip-static-archive
+index 4dc449061..13d9a098b 100755
+--- a/scripts/brp-strip-static-archive
++++ b/scripts/brp-strip-static-archive
+@@ -13,10 +13,6 @@ Darwin*) exit 0 ;;
+ esac
+ 
+ # Strip static libraries.
+-for f in `find "$RPM_BUILD_ROOT" -type f | \
+-	grep -v "^${RPM_BUILD_ROOT}/\?usr/lib/debug" | \
+-	xargs -r -P$NCPUS -n16 file | sed 's/:  */: /' | \
+-	grep 'current ar archive' | \
+-	sed -n -e 's/^\(.*\):[  ]*current ar archive/\1/p'`; do
+-	$STRIP -g "$f"
+-done
++find "$RPM_BUILD_ROOT" -type f | \
++    grep -v "^${RPM_BUILD_ROOT}/\?usr/lib/debug" | \
++    xargs -r -P$NCPUS -n32 sh -c "file \"\$@\" | sed 's/:  */: /' | grep 'current ar archive' | sed -n -e 's/^\(.*\):[  ]*current ar archive/\1/p' | xargs -I\{\} $STRIP -g \{\}" ARG0
+-- 
+2.21.0
+

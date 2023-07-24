@@ -1,0 +1,7 @@
+<map id="Internal APIs:" name="Internal APIs:">
+<area shape="rect" id="node1" href="$group__rpmargv.html" title="Argument Manipulation API (internal). " alt="" coords="156,5,341,32"/>
+<area shape="rect" id="node2" href="$group__rpmcli.html" title="Parsing RPM command line arguments (internal). " alt="" coords="179,56,319,83"/>
+<area shape="rect" id="node4" href="$group__rpmrc.html" title="Reading config files and getting some important configuration values. " alt="" coords="211,107,287,133"/>
+<area shape="rect" id="node5" href="$group__rpmsq.html" title="Signal Queue API (internal). " alt="" coords="183,157,314,184"/>
+<area shape="rect" id="node6" href="$group__rpmsw.html" title="Statistics API (internal). " alt="" coords="195,208,302,235"/>
+</map>

@@ -1,0 +1,10 @@
+<map id="rpmSpec_s" name="rpmSpec_s">
+<area shape="rect" id="node2" href="$structspectags__s.html" title="spectags_s" alt="" coords="5,95,95,121"/>
+<area shape="rect" id="node3" href="$structspectag__s.html" title="spectag_s" alt="" coords="9,5,91,32"/>
+<area shape="rect" id="node4" href="$structReadLevelEntry.html" title="ReadLevelEntry" alt="" coords="119,95,234,121"/>
+<area shape="rect" id="node5" href="$structOpenFileInfo.html" title="OpenFileInfo" alt="" coords="311,95,407,121"/>
+<area shape="rect" id="node6" href="$structPackage__s.html" title="The structure used to store values for a package. " alt="" coords="485,95,572,121"/>
+<area shape="rect" id="node7" href="$structTriggerFileEntry.html" title="TriggerFileEntry" alt="" coords="450,5,565,32"/>
+<area shape="rect" id="node8" href="$structSource.html" title="Source" alt="" coords="643,5,705,32"/>
+<area shape="rect" id="node9" href="$structspeclines__s.html" title="speclines_s" alt="" coords="749,95,839,121"/>
+</map>

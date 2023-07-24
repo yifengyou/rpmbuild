@@ -1,0 +1,40 @@
+From 2e61e5846f8301f85da9d30281538ea736d96fd0 Mon Sep 17 00:00:00 2001
+From: Michal Domonkos <mdomonko@redhat.com>
+Date: Tue, 7 Dec 2021 08:08:37 +0100
+Subject: [PATCH] Skip recorded symlinks in --setperms (RhBug:1900662)
+
+If a package contains a symlink in the buildroot which is declared as a
+ghost or config file but is a regular file or directory on the system
+where it's installed, a --setperms call will reset its permissions to
+those of a symlink (777 on Linux), which almost certainly is not the
+correct thing to do.
+
+To fix that, just skip files that were recorded as symlinks.
+
+This is a special case of a general issue in --setperms; since file
+permission semantics may change depending on the file type, to stay on
+the safe side, any (ghost or config) file whose type changes after
+installation should probably be skipped.  However, symlinks are the most
+prominent case here, so let's just focus on that now and avoid adding
+too much cleverness to a popt alias (this got us into trouble not too
+long ago, see commits 38c2f6e and 0d83637).  We may revisit this in the
+eventual C implementation.
+---
+ rpmpopt.in | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/rpmpopt.in b/rpmpopt.in
+index 67fcabfb1..e130a5d05 100644
+--- a/rpmpopt.in
++++ b/rpmpopt.in
+@@ -44,6 +44,7 @@ rpm	alias --scripts --qf '\
+ 	--POPTdesc=$"list install/erase scriptlets from package(s)"
+ 
+ rpm	alias --setperms -q --qf '[\[ -L %{FILENAMES:shescape} \] || \
++        \[ -n %{FILELINKTOS:shescape} \] || \
+         ( \[ $((%{FILEFLAGS} & 2#1001000)) != 0 \] && \[ ! -e %{FILENAMES:shescape} \] ) || \
+         chmod %7{FILEMODES:octal} %{FILENAMES:shescape}\n]' \
+ 		   --pipe "grep -v \(none\) | grep '^. -L ' | sed 's/chmod .../chmod /' | sh" \
+-- 
+2.35.1
+

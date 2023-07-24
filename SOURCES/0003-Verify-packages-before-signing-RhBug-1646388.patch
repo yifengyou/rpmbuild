@@ -1,0 +1,114 @@
+From df089e178da0918dc74a8572a99324b0987bce30 Mon Sep 17 00:00:00 2001
+Message-Id: <df089e178da0918dc74a8572a99324b0987bce30.1554983206.git.pmatilai@redhat.com>
+In-Reply-To: <2ec0832287bd1443ebf336f8a98293f30bfa2036.1554983205.git.pmatilai@redhat.com>
+References: <2ec0832287bd1443ebf336f8a98293f30bfa2036.1554983205.git.pmatilai@redhat.com>
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Mon, 18 Mar 2019 15:56:34 +0200
+Subject: [PATCH 3/3] Verify packages before signing (RhBug:1646388)
+
+Permitting corrupted packages to be signed is bad business for everybody
+involved, this is something we should've always done. Besides being an
+actual security risk, it can lead to odd results with verification
+especially with the payload digest on signed packages.
+
+One point worth noting is that this means that pre 4.14-packages cannot
+be signed in FIPS mode now because there's no way to validate the package
+payload range due to MD5 being disabled. This seems like a feature and
+not a limitation, so disabler for the verify step intentionally left out.
+
+Optimally we'd verify the package on the same read that's passed
+to gpg but for simplicitys sake that's left as an future exercise,
+now we simply read the package twice.
+---
+ sign/rpmgensig.c   | 32 ++++++++++++++++++++++++++++++++
+ tests/rpmsigdig.at | 20 ++++++++++++++++++++
+ 2 files changed, 52 insertions(+)
+
+diff --git a/sign/rpmgensig.c b/sign/rpmgensig.c
+index 2bcbab768..5be542001 100644
+--- a/sign/rpmgensig.c
++++ b/sign/rpmgensig.c
+@@ -21,6 +21,7 @@
+ 
+ #include "lib/rpmlead.h"
+ #include "lib/signature.h"
++#include "lib/rpmvs.h"
+ #include "sign/rpmsignfiles.h"
+ 
+ #include "debug.h"
+@@ -489,6 +490,31 @@ static rpmRC includeFileSignatures(Header *sigp, Header *hdrp)
+ #endif
+ }
+ 
++static int msgCb(struct rpmsinfo_s *sinfo, void *cbdata)
++{
++    char **msg = cbdata;
++    if (sinfo->rc && *msg == NULL)
++	*msg = rpmsinfoMsg(sinfo);
++    return (sinfo->rc != RPMRC_FAIL);
++}
++
++/* Require valid digests on entire package for signing. */
++static int checkPkg(FD_t fd, char **msg)
++{
++    int rc;
++    struct rpmvs_s *vs = rpmvsCreate(RPMSIG_DIGEST_TYPE, 0, NULL);
++    off_t offset = Ftell(fd);
++
++    Fseek(fd, 0, SEEK_SET);
++    rc = rpmpkgRead(vs, fd, NULL, NULL, msg);
++    if (!rc)
++	rc = rpmvsVerify(vs, RPMSIG_DIGEST_TYPE, msgCb, msg);
++    Fseek(fd, offset, SEEK_SET);
++
++    rpmvsFree(vs);
++    return rc;
++}
++
+ /** \ingroup rpmcli
+  * Create/modify elements in signature header.
+  * @param rpm		path to package
+@@ -519,6 +545,12 @@ static int rpmSign(const char *rpm, int deleting, int signfiles)
+     if (manageFile(&fd, rpm, O_RDWR))
+ 	goto exit;
+ 
++    /* Ensure package is intact before attempting to sign */
++    if ((rc = checkPkg(fd, &msg))) {
++	rpmlog(RPMLOG_ERR, "not signing corrupt package %s: %s\n", rpm, msg);
++	goto exit;
++    }
++
+     if ((rc = rpmLeadRead(fd, &msg)) != RPMRC_OK) {
+ 	rpmlog(RPMLOG_ERR, "%s: %s\n", rpm, msg);
+ 	goto exit;
+diff --git a/tests/rpmsigdig.at b/tests/rpmsigdig.at
+index 413c3d2c8..e93420306 100644
+--- a/tests/rpmsigdig.at
++++ b/tests/rpmsigdig.at
+@@ -472,3 +472,23 @@ run rpmsign --key-id 1964C5FC --addsign "${RPMTEST}"/tmp/hello-2.0-1.x86_64-sign
+ [],
+ [])
+ AT_CLEANUP
++
++AT_SETUP([rpmsign --addsign <corrupted>])
++AT_KEYWORDS([rpmsign signature])
++AT_CHECK([
++RPMDB_CLEAR
++RPMDB_INIT
++rm -rf "${TOPDIR}"
++
++pkg="hello-2.0-1.x86_64.rpm"
++cp "${RPMTEST}"/data/RPMS/${pkg} "${RPMTEST}"/tmp/${pkg}
++dd if=/dev/zero of="${RPMTEST}"/tmp/${pkg} \
++   conv=notrunc bs=1 seek=333 count=4 2> /dev/null
++run rpmsign --key-id 1964C5FC --addsign "${RPMTEST}/tmp/${pkg}"
++],
++[1],
++[/home/pmatilai/repos/rpm/tests/testing/tmp/hello-2.0-1.x86_64.rpm:
++],
++[error: not signing corrupt package /home/pmatilai/repos/rpm/tests/testing/tmp/hello-2.0-1.x86_64.rpm: MD5 digest: BAD (Expected 007ca1d8b35cca02a1854ba301c5432e != 137ca1d8b35cca02a1854ba301c5432e)
++])
++AT_CLEANUP
+-- 
+2.20.1
+

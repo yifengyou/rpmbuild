@@ -1,0 +1,152 @@
+From 13f70e3710b2df49a923cc6450ff4a8f86e65666 Mon Sep 17 00:00:00 2001
+Message-Id: <13f70e3710b2df49a923cc6450ff4a8f86e65666.1555050140.git.pmatilai@redhat.com>
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Wed, 20 Mar 2019 12:38:00 +0200
+Subject: [PATCH] Fix FA_TOUCH on files with suid/sgid bits and/or capabilities
+
+FA_TOUCH used to set suffix to "" instead of NULL which causes fsmCommit()
+to rename the file onto itself, which is a bit dumb but mostly harmless
+with regular permission. On suid/sgid/capabilities we strip any extra
+privileges on rename to make sure hardlinks are neutered, and because
+rename occurs after other permissions etc setting, on FA_TOUCH those
+extra privileges are stripped and much brokenness will follow.
+
+A more minimal fix would be a strategically placed strcmp(), but NULL
+is what the rest of the fsm expects for no suffix and differentiating
+between empty and NULL suffix is too subtle for its own good as
+witnessed here. So now, NULL suffix is no suffix again and the rest
+of the code will do the right thing except where related to creation,
+and creation is what FA_TOUCH wont do so lets just explicitly skip it
+and restore the original code otherwise. The goto is ugly but reindenting
+gets even uglier, shrug. Add a test-case to go with it.
+
+This has been broken since its introduction in commit
+79ca74e15e15c1d91a9a31a9ee90abc91736f390 so all current 4.14.x versions
+are affected.
+---
+ lib/fsm.c                         | 17 ++++++++++----
+ tests/data/SPECS/replacetest.spec |  2 +-
+ tests/rpmverify.at                | 38 ++++++++++++++++++++++++++++++-
+ 3 files changed, 50 insertions(+), 7 deletions(-)
+
+diff --git a/lib/fsm.c b/lib/fsm.c
+index 8eb2c185c..432bcbd90 100644
+--- a/lib/fsm.c
++++ b/lib/fsm.c
+@@ -898,12 +898,12 @@ int rpmPackageFilesInstall(rpmts ts, rpmte te, rpmfiles files,
+ 
+ 	action = rpmfsGetAction(fs, rpmfiFX(fi));
+ 	skip = XFA_SKIPPING(action);
+-	suffix = S_ISDIR(rpmfiFMode(fi)) ? NULL : tid;
+ 	if (action != FA_TOUCH) {
+-	    fpath = fsmFsPath(fi, suffix);
++	    suffix = S_ISDIR(rpmfiFMode(fi)) ? NULL : tid;
+ 	} else {
+-	    fpath = fsmFsPath(fi, "");
++	    suffix = NULL;
+ 	}
++	fpath = fsmFsPath(fi, suffix);
+ 
+ 	/* Remap file perms, owner, and group. */
+ 	rc = rpmfiStat(fi, 1, &sb);
+@@ -926,6 +926,10 @@ int rpmPackageFilesInstall(rpmts ts, rpmte te, rpmfiles files,
+         if (!skip) {
+ 	    int setmeta = 1;
+ 
++	    /* When touching we don't need any of this... */
++	    if (action == FA_TOUCH)
++		goto touch;
++
+ 	    /* Directories replacing something need early backup */
+ 	    if (!suffix) {
+ 		rc = fsmBackup(fi, action);
+@@ -934,7 +938,7 @@ int rpmPackageFilesInstall(rpmts ts, rpmte te, rpmfiles files,
+ 	    if (!suffix) {
+ 		rc = fsmVerify(fpath, fi);
+ 	    } else {
+-		rc = (action == FA_TOUCH) ? 0 : RPMERR_ENOENT;
++		rc = RPMERR_ENOENT;
+ 	    }
+ 
+             if (S_ISREG(sb.st_mode)) {
+@@ -970,11 +974,14 @@ int rpmPackageFilesInstall(rpmts ts, rpmte te, rpmfiles files,
+                 if (!IS_DEV_LOG(fpath))
+                     rc = RPMERR_UNKNOWN_FILETYPE;
+             }
++
++touch:
+ 	    /* Set permissions, timestamps etc for non-hardlink entries */
+ 	    if (!rc && setmeta) {
+ 		rc = fsmSetmeta(fpath, fi, plugins, action, &sb, nofcaps);
+ 	    }
+         } else if (firsthardlink >= 0 && rpmfiArchiveHasContent(fi)) {
++	    /* On FA_TOUCH no hardlinks are created thus this is skipped. */
+ 	    /* we skip the hard linked file containing the content */
+ 	    /* write the content to the first used instead */
+ 	    char *fn = rpmfilesFN(files, firsthardlink);
+@@ -987,7 +994,7 @@ int rpmPackageFilesInstall(rpmts ts, rpmte te, rpmfiles files,
+         if (rc) {
+             if (!skip) {
+                 /* XXX only erase if temp fn w suffix is in use */
+-                if (suffix && (action != FA_TOUCH)) {
++                if (suffix) {
+ 		    (void) fsmRemove(fpath, sb.st_mode);
+                 }
+                 errno = saveerrno;
+diff --git a/tests/data/SPECS/replacetest.spec b/tests/data/SPECS/replacetest.spec
+index 54974567b..d5a1729d3 100644
+--- a/tests/data/SPECS/replacetest.spec
++++ b/tests/data/SPECS/replacetest.spec
+@@ -46,4 +46,4 @@ rm -rf $RPM_BUILD_ROOT
+ 
+ %files
+ %defattr(-,%{user},%{grp},-)
+-/opt/*
++%{?fileattr} /opt/*
+diff --git a/tests/rpmverify.at b/tests/rpmverify.at
+index 52ee2abfb..f7dd57531 100644
+--- a/tests/rpmverify.at
++++ b/tests/rpmverify.at
+@@ -575,3 +575,39 @@
+ ],
+ [])
+ AT_CLEANUP
++
++AT_SETUP([Upgraded verification with min_writes 5 (suid files)])
++AT_KEYWORDS([upgrade verify min_writes])
++AT_CHECK([
++RPMDB_CLEAR
++RPMDB_INIT
++tf="${RPMTEST}"/opt/foo
++rm -rf "${tf}" "${tf}".rpm*
++rm -rf "${TOPDIR}"
++
++for v in "1.0" "2.0"; do
++    runroot rpmbuild --quiet -bb \
++        --define "ver $v" \
++	--define "filetype file" \
++	--define "filedata foo" \
++	--define "fileattr %attr(2755,-,-)" \
++          /data/SPECS/replacetest.spec
++done
++
++runroot rpm -U /build/RPMS/noarch/replacetest-1.0-1.noarch.rpm
++runroot rpm -Va --nouser --nogroup replacetest
++runroot rpm -U \
++	--define "_minimize_writes 1" \
++	 /build/RPMS/noarch/replacetest-2.0-1.noarch.rpm
++runroot rpm -Va --nouser --nogroup replacetest
++chmod 777 "${tf}"
++runroot rpm -U \
++	--oldpackage \
++	--define "_minimize_writes 1" \
++	 /build/RPMS/noarch/replacetest-1.0-1.noarch.rpm
++runroot rpm -Va --nouser --nogroup replacetest
++],
++[0],
++[],
++[])
++AT_CLEANUP
+-- 
+2.20.1
+

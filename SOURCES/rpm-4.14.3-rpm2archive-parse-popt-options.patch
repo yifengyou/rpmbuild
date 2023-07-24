@@ -1,0 +1,36 @@
+From 8f416b275a365426b07c75adfc017e0b18a85450 Mon Sep 17 00:00:00 2001
+From: Florian Festi <ffesti@redhat.com>
+Date: Fri, 16 Dec 2022 15:45:20 +0100
+Subject: [PATCH] rpm2archive: Properly parse popt options
+
+and issue an error message for unknown options. Before unknown options
+could mess up the argument parsing leading to reading and writing from
+stdin/stdout.
+
+Thanks to Eva Mrakova and the Red Hat QE team for spotting this!
+---
+ rpm2archive.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/rpm2archive.c b/rpm2archive.c
+index de1a17d2b..09da8d16b 100644
+--- a/rpm2archive.c
++++ b/rpm2archive.c
+@@ -233,6 +233,14 @@ int main(int argc, const char *argv[])
+ 
+     optCon = poptGetContext(NULL, argc, argv, optionsTable, 0);
+     poptSetOtherOptionHelp(optCon, "[OPTIONS]* <FILES>");
++    while ((rc = poptGetNextOpt(optCon)) != -1) {
++	if (rc < 0) {
++	    fprintf(stderr, "%s: %s\n",
++		    poptBadOption(optCon, POPT_BADOPTION_NOALIAS),
++		    poptStrerror(rc));
++	    exit(EXIT_FAILURE);
++	}
++    }
+     if (argc < 2 || poptGetNextOpt(optCon) == 0) {
+ 	poptPrintUsage(optCon, stderr, 0);
+ 	exit(EXIT_FAILURE);
+-- 
+2.38.1
+

@@ -1,0 +1,44 @@
+From 8fefd2bd21b30996ad0748eab6baadf915610642 Mon Sep 17 00:00:00 2001
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Thu, 13 Aug 2020 13:29:10 +0300
+Subject: [PATCH] Work around buggy signature region preventing resigning
+ (RhBug:1851508)
+
+Various proprietary packages in the wild have subtly malformed data
+in the signature header, in particular wrt the immutable region size,
+presumably from using some in-house/3rd party signing tools which do
+not understand the immutable region business at all. This can prevent
+resigning and signature deletion on such packages due to the more
+thorough checking that rpmsign does.
+
+As the old wisdom goes, be liberal in what you accept... we can easily
+work around the crud by just taking a fresh copy of the contents that
+are legit as such (otherwise the package would be uninstallable).
+
+
+Adjusted for 4.14.3
+
+--- rpm-4.14.3/sign/rpmgensig.c.orig	2020-10-29 16:00:38.785229048 +0100
++++ rpm-4.14.3/sign/rpmgensig.c	2020-10-29 16:08:55.997791345 +0100
+@@ -401,12 +401,19 @@
+ 
+     if (headerGet(*hdrp, tag, utd, HEADERGET_DEFAULT)) {
+ 	oh = headerCopyLoad(utd->data);
+-	nh = headerCopy(oh);
+-	headerFree(oh);
+ 	rpmtdFreeData(utd);
++    } else {
++	/* XXX should we warn if the immutable region is corrupt/missing? */
++	oh = headerLink(*hdrp);
++    }
++
++    if (oh) {
++	/* Perform a copy to eliminate crud from buggy signing tools etc */
++	nh = headerCopy(oh);
+ 	headerFree(*hdrp);
+ 	*hdrp = headerLink(nh);
+ 	headerFree(nh);
++	headerFree(oh);
+     }
+ }
+ 

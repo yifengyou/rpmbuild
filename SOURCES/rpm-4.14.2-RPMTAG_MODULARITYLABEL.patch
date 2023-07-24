@@ -1,0 +1,107 @@
+From 8390fa8515f499994646cf3bd113423744dc7bd9 Mon Sep 17 00:00:00 2001
+From: Florian Festi <ffesti@redhat.com>
+Date: Fri, 30 Nov 2018 11:02:52 +0100
+Subject: [PATCH] Add RPMTAG_MODULARITYLABEL to distinguish packages build for
+ modularity
+
+Tag can be set with a ModularityLabel: statement in the spec file preamble or
+via the modularitylabel macro
+---
+ build/parsePreamble.c | 4 ++++
+ build/parseSpec.c     | 1 +
+ lib/rpmtag.h          | 1 +
+ macros.in             | 5 +++++
+ tests/rpmgeneral.at   | 1 +
+ 5 files changed, 12 insertions(+)
+
+diff --git a/build/parsePreamble.c b/build/parsePreamble.c
+index f5e06bac8..e340e5c7a 100644
+--- a/build/parsePreamble.c
++++ b/build/parsePreamble.c
+@@ -43,6 +43,7 @@ static const rpmTagVal copyTagsDuringParse[] = {
+     RPMTAG_DISTTAG,
+     RPMTAG_BUGURL,
+     RPMTAG_GROUP,
++    RPMTAG_MODULARITYLABEL,
+     0
+ };
+ 
+@@ -526,6 +527,7 @@ static struct optionalTag {
+     { RPMTAG_DISTURL,		"%{disturl}" },
+     { RPMTAG_DISTTAG,		"%{disttag}" },
+     { RPMTAG_BUGURL,		"%{bugurl}" },
++    { RPMTAG_MODULARITYLABEL,	"%{modularitylabel}"},
+     { -1, NULL }
+ };
+ 
+@@ -779,6 +781,7 @@ static rpmRC handlePreambleTag(rpmSpec spec, Package pkg, rpmTagVal tag,
+     case RPMTAG_URL:
+     case RPMTAG_DISTTAG:
+     case RPMTAG_BUGURL:
++    case RPMTAG_MODULARITYLABEL:
+     /* XXX TODO: validate format somehow */
+     case RPMTAG_VCS:
+ 	SINGLE_TOKEN_ONLY;
+@@ -1018,6 +1021,7 @@ static struct PreambleRec_s const preambleList[] = {
+     {RPMTAG_BUGURL,		0, 0, LEN_AND_STR("bugurl")},
+     {RPMTAG_ORDERNAME,		2, 0, LEN_AND_STR("orderwithrequires")},
+     {RPMTAG_REMOVEPATHPOSTFIXES,0, 0, LEN_AND_STR("removepathpostfixes")},
++    {RPMTAG_MODULARITYLABEL,	0, 0, LEN_AND_STR("modularitylabel")},
+     {0, 0, 0, 0}
+ };
+ 
+diff --git a/build/parseSpec.c b/build/parseSpec.c
+index bf4789942..c80802baf 100644
+--- a/build/parseSpec.c
++++ b/build/parseSpec.c
+@@ -517,6 +517,7 @@ static const rpmTagVal sourceTags[] = {
+     RPMTAG_BUGURL,
+     RPMTAG_HEADERI18NTABLE,
+     RPMTAG_VCS,
++    RPMTAG_MODULARITYLABEL,
+     0
+ };
+ 
+diff --git a/lib/rpmtag.h b/lib/rpmtag.h
+index 973a6b69d..b9623ef24 100644
+--- a/lib/rpmtag.h
++++ b/lib/rpmtag.h
+@@ -368,6 +368,7 @@
+     RPMTAG_FILESIGNATURELENGTH  = 5091, /* i */
+     RPMTAG_PAYLOADDIGEST	= 5092, /* s[] */
+     RPMTAG_PAYLOADDIGESTALGO	= 5093, /* i */
++    RPMTAG_MODULARITYLABEL	= 5096, /* s */
+ 
+     RPMTAG_FIRSTFREE_TAG	/*!< internal */
+ } rpmTag;
+diff --git a/macros.in b/macros.in
+index e0a1aea4e..cb4929c10 100644
+--- a/macros.in
++++ b/macros.in
+@@ -357,6 +357,11 @@ package or when debugging this package.\
+ %_javadir      %{_datadir}/java
+ %_javadocdir   %{_datadir}/javadoc
+ 
++
++#	Set ModularityLabel: for packages being build
++#
++#%modularitylabel
++
+ #	A colon separated list of paths where files should *not* be installed.
+ #	Usually, these are network file system mount points.
+ #
+diff --git a/tests/rpmgeneral.at b/tests/rpmgeneral.at
+index 509277f2c..45d38698b 100644
+--- a/tests/rpmgeneral.at
++++ b/tests/rpmgeneral.at
+@@ -150,6 +150,7 @@ LONGARCHIVESIZE
+ LONGFILESIZES
+ LONGSIGSIZE
+ LONGSIZE
++MODULARITYLABEL
+ N
+ NAME
+ NEVR
+-- 
+2.17.2
+

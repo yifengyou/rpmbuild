@@ -1,0 +1,10 @@
+<map id="(un)Installing packages:" name="(un)Installing packages:">
+<area shape="rect" id="node1" href="$group__rpmprob.html" title="Problem Element API." alt="" coords="242,5,405,31"/>
+<area shape="rect" id="node2" href="$group__rpmcallback.html" title="The signature of function to register as callback and the cases where it can be called." alt="" coords="252,55,395,95"/>
+<area shape="rect" id="node3" title=" " alt="" coords="5,169,184,195"/>
+<area shape="rect" id="node4" href="$group__rpmds.html" title="How to compare dependencies." alt="" coords="245,120,402,145"/>
+<area shape="rect" id="node5" href="$group__rpmps.html" title="Problem Set API." alt="" coords="258,169,389,195"/>
+<area shape="rect" id="node6" href="$group__rpmte.html" title="How to retrieve information from a transaction element." alt="" coords="232,219,415,244"/>
+<area shape="rect" id="node7" href="$group__rpmts.html" title="How to create, run &amp; destroy a package transaction." alt="" coords="248,268,399,293"/>
+<area shape="rect" id="node8" href="$group__rpmvf.html" title="How to verify a package." alt="" coords="279,317,368,343"/>
+</map>

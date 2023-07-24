@@ -1,0 +1,13 @@
+--- rpm-4.14.3/configure.ac.orig	2020-05-04 21:08:41.481365399 +0200
++++ rpm-4.14.3/configure.ac	2020-05-04 21:09:03.550604043 +0200
+@@ -129,8 +129,8 @@
+ 
+ AC_PATH_PROG(__PERL, perl, /usr/bin/perl, $MYPATH)
+ AC_PATH_PROG(__PGP, pgp, /usr/bin/pgp, $MYPATH)
+-AC_PATH_PROG(__PYTHON, python2, /usr/bin/python2, $MYPATH)
+-AC_PATH_PROG(PYTHON, python2, /usr/bin/python2, $MYPATH)
++AC_PATH_PROG(__PYTHON, python3, /usr/bin/python3, $MYPATH)
++AC_PATH_PROG(PYTHON, python3, /usr/bin/python3, $MYPATH)
+ AC_PATH_PROG(__RM, rm, /bin/rm, $MYPATH)
+ AC_PATH_PROG(__RSH, rsh, /usr/bin/rsh, $MYPATH)
+ AC_PATH_PROG(__SED, sed, /bin/sed, $MYPATH)

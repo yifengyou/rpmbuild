@@ -1,0 +1,41 @@
+From 98470eccf09b80ed11528ac893852d649c50be72 Mon Sep 17 00:00:00 2001
+Message-Id: <98470eccf09b80ed11528ac893852d649c50be72.1571920849.git.pmatilai@redhat.com>
+In-Reply-To: <6b6c4d881dc6fc99f949dac4aaf9a513542f9956.1571920849.git.pmatilai@redhat.com>
+References: <6b6c4d881dc6fc99f949dac4aaf9a513542f9956.1571920849.git.pmatilai@redhat.com>
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Fri, 5 Oct 2018 14:05:27 +0300
+Subject: [PATCH 5/5] Drop an unnecessary Python 2 vs 3 incompatibility from
+ the test
+
+Python 2 speaks about 'type' whereas 3 speaks about 'class', which from
+our perspective is just unnecessary pain with no gain.
+
+(cherry picked from commit ff3d8ac2e5cb4456ad1355f227f3ccef08e01972)
+---
+ tests/rpmpython.at | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/tests/rpmpython.at b/tests/rpmpython.at
+index ae020ae95..bc42e49e4 100644
+--- a/tests/rpmpython.at
++++ b/tests/rpmpython.at
+@@ -92,7 +92,7 @@ h['arch'] = 'noarch'
+ myprint(h['nevra'])
+ del h['epoch']
+ myprint(h['nevra'])
+-for a in ['name', 'bugurl', '__class__', '__foo__', ]:
++for a in ['name', 'bugurl', '__foo__', ]:
+     try:
+         x = getattr(h, a)
+         myprint(x)
+@@ -103,7 +103,6 @@ for a in ['name', 'bugurl', '__class__', '__foo__', ]:
+ testpkg-1.0-1.noarch
+ testpkg
+ None
+-<type 'rpm.hdr'>
+ 'rpm.hdr' object has no attribute '__foo__']
+ )
+ 
+-- 
+2.21.0
+

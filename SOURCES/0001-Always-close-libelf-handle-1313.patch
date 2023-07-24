@@ -1,0 +1,32 @@
+From 38c03ddb18e86c84d89af695f72442d8365eb64e Mon Sep 17 00:00:00 2001
+From: Florian Festi <ffesti@redhat.com>
+Date: Tue, 21 Jul 2020 10:45:20 +0200
+Subject: [PATCH] Always close libelf handle (#1313)
+
+Otherwise executables that are not proper elf files are leaking libelf
+handles. This results in file being left open (mmap'ed) and fails the
+build on NFS as those files can't be deleted properly there.
+
+Resolves: rhbz#1840728
+See also: https://bugzilla.redhat.com/show_bug.cgi?id=1840728
+---
+ build/files.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/build/files.c b/build/files.c
+index f675306f7..62489c07c 100644
+--- a/build/files.c
++++ b/build/files.c
+@@ -1935,8 +1935,8 @@ static int generateBuildIDs(FileList fl, ARGV_t *files)
+ 			if (terminate)
+ 			    rc = 1;
+ 		    }
+-		    elf_end (elf);
+ 		}
++		elf_end (elf);
+ 		close (fd);
+ 	    }
+ 	}
+-- 
+2.26.2
+

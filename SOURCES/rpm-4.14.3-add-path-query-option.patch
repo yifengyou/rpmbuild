@@ -1,0 +1,197 @@
+From 013cd4ba63c35fa75feeccde0022d56e68bc5845 Mon Sep 17 00:00:00 2001
+From: Michal Domonkos <mdomonko@redhat.com>
+Date: Mon, 16 Aug 2021 18:21:02 +0200
+Subject: [PATCH] Add support for RPMDBI_BASENAMES on file queries
+
+There are legitimate reasons (such as rhbz#1940895 or the included test)
+for wanting the former behavior where all file states were considered in
+file queries prior to commit 9ad57bda4a82b9847826daa766b4421d877bb3d9,
+so celebrate the tenth anniversary of that commit by adding a CLI switch
+(a new package selector --path), as contemplated back then.
+
+Update the man page for --file to reflect it's current behavior and make
+--path that more obvious.
+
+Resolves: rhbz#1940895
+
+Combined with:
+d1aebda01033bc8ba0d748b49f6fad9a5c0caa3f
+f62b6d27cd741406a52a7e9c5b1d6f581dbd3af8
+
+Backported for 4.14.3.
+---
+ doc/rpm.8         |  9 ++++++--
+ lib/poptQV.c      |  6 +++++-
+ lib/query.c       |  7 +++++--
+ lib/rpmcli.h      |  1 +
+ tests/rpmquery.at | 52 +++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 70 insertions(+), 5 deletions(-)
+
+diff --git a/doc/rpm.8 b/doc/rpm.8
+index 15a3db25f..74604c8ec 100644
+--- a/doc/rpm.8
++++ b/doc/rpm.8
+@@ -57,7 +57,7 @@ rpm \- RPM Package Manager
+ .PP
+ 
+  [\fB\fIPACKAGE_NAME\fB\fR]
+- [\fB-a,--all [\fISELECTOR\fR]\fR] [\fB-f,--file \fIFILE\fB\fR]
++ [\fB-a,--all [\fISELECTOR\fR]\fR] [\fB-f,--file \fIFILE\fB\fR] [\fB--path \fIPATH\fB\fR]
+  [\fB-g,--group \fIGROUP\fB\fR] {\fB-p,--package \fIPACKAGE_FILE\fB\fR]
+  [\fB--hdrid \fISHA1\fB\fR] [\fB--pkgid \fIMD5\fB\fR] [\fB--tid \fITID\fB\fR]
+  [\fB--querybynumber \fIHDRNUM\fB\fR] [\fB--triggeredby \fIPACKAGE_NAME\fB\fR]
+@@ -555,7 +555,7 @@ starts with "b".
+ List duplicated packages.
+ .TP
+ \fB-f, --file \fIFILE\fB\fR
+-Query package owning \fIFILE\fR.
++Query package owning installed \fIFILE\fR.
+ .TP
+ \fB--filecaps\fR
+ List file names with POSIX1.e capabilities.
+@@ -598,6 +598,11 @@ that will be expanded to paths that are substituted in place of
+ the package manifest as additional \fIPACKAGE_FILE\fR
+ arguments to the query.
+ .TP
++\fB--path \fIPATH\fB\fR
++Query package(s) owning \fIPATH\fR, whether the file is installed or not.
++Multiple packages may own a \fIPATH\fR, but the file is only owned by the
++package installed last.
++.TP
+ \fB--pkgid \fIMD5\fB\fR
+ Query package that contains a given package identifier, i.e. the
+ \fIMD5\fR digest of the combined header and
+diff --git a/lib/poptQV.c b/lib/poptQV.c
+index 9021d7b3c..f752d8b82 100644
+--- a/lib/poptQV.c
++++ b/lib/poptQV.c
+@@ -27,6 +27,7 @@ struct rpmQVKArguments_s rpmQVKArgs;
+ #define POPT_WHATENHANCES	-1014
+ #define POPT_WHATOBSOLETES	-1015
+ #define POPT_WHATCONFLICTS	-1016
++#define POPT_QUERYBYPATH	-1017
+ 
+ /* ========== Query/Verify/Signature source args */
+ static void rpmQVSourceArgCallback( poptContext con,
+@@ -58,6 +59,7 @@ static void rpmQVSourceArgCallback( poptContext con,
+     case POPT_WHATSUPPLEMENTS: qva->qva_source |= RPMQV_WHATSUPPLEMENTS; break;
+     case POPT_WHATENHANCES: qva->qva_source |= RPMQV_WHATENHANCES; break;
+     case POPT_TRIGGEREDBY: qva->qva_source |= RPMQV_TRIGGEREDBY; break;
++    case POPT_QUERYBYPATH: qva->qva_source |= RPMQV_PATH_ALL; break;
+     case POPT_QUERYBYPKGID: qva->qva_source |= RPMQV_PKGID; break;
+     case POPT_QUERYBYHDRID: qva->qva_source |= RPMQV_HDRID; break;
+     case POPT_QUERYBYTID: qva->qva_source |= RPMQV_TID; break;
+@@ -80,7 +82,9 @@ struct poptOption rpmQVSourcePoptTable[] = {
+  { "checksig", 'K', POPT_ARGFLAG_DOC_HIDDEN, NULL, 'K',
+ 	N_("rpm checksig mode"), NULL },
+  { "file", 'f', 0, 0, 'f',
+-	N_("query/verify package(s) owning file"), "FILE" },
++	N_("query/verify package(s) owning installed file"), "FILE" },
++ { "path", '\0', 0, 0, POPT_QUERYBYPATH,
++	N_("query/verify package(s) owning path, installed or not"), "PATH" },
+  { "group", 'g', 0, 0, 'g',
+ 	N_("query/verify package(s) in group"), "GROUP" },
+  { "package", 'p', 0, 0, 'p',
+diff --git a/lib/query.c b/lib/query.c
+index 26cdecf10..e6ea1fa2d 100644
+--- a/lib/query.c
++++ b/lib/query.c
+@@ -440,6 +440,7 @@ static rpmdbMatchIterator initQueryIterator(QVA_t qva, rpmts ts, const char * ar
+ 	}
+ 	/* fallthrough on absolute and relative paths */
+     case RPMQV_PATH:
++    case RPMQV_PATH_ALL:
+     {   char * fn;
+ 
+ 	for (s = arg; *s != '\0'; s++)
+@@ -458,8 +459,10 @@ static rpmdbMatchIterator initQueryIterator(QVA_t qva, rpmts ts, const char * ar
+ 	    fn = xstrdup(arg);
+ 	(void) rpmCleanPath(fn);
+ 
+-	/* XXX Add a switch to enable former BASENAMES behavior? */
+-	mi = rpmtsInitIterator(ts, RPMDBI_INSTFILENAMES, fn, 0);
++	rpmDbiTagVal tag = RPMDBI_INSTFILENAMES;
++	if (qva->qva_source == RPMQV_PATH_ALL)
++	    tag = RPMDBI_BASENAMES;
++	mi = rpmtsInitIterator(ts, tag, fn, 0);
+ 	if (mi == NULL)
+ 	    mi = rpmtsInitIterator(ts, RPMDBI_PROVIDENAME, fn, 0);
+ 
+diff --git a/lib/rpmcli.h b/lib/rpmcli.h
+index 99af2585a..c0d07d137 100644
+--- a/lib/rpmcli.h
++++ b/lib/rpmcli.h
+@@ -102,6 +102,7 @@ enum rpmQVSources_e {
+     RPMQV_SPECBUILTRPMS,	/*!< ... from pkgs which would be built from spec */
+     RPMQV_WHATOBSOLETES,	/*!< ... from obsoletes db search. */
+     RPMQV_WHATCONFLICTS,	/*!< ... from conflicts db search. */
++    RPMQV_PATH_ALL,	/*!< ... from file path db search (all states). */
+ };
+ 
+ typedef rpmFlags rpmQVSources;
+diff --git a/tests/rpmquery.at b/tests/rpmquery.at
+index 36c62339a..ad580f664 100644
+--- a/tests/rpmquery.at
++++ b/tests/rpmquery.at
+@@ -194,6 +194,58 @@ runroot rpm \
+ 
+ AT_CLEANUP
+ 
++# ------------------------------
++# query a package by a file
++AT_SETUP([rpm -qf])
++AT_KEYWORDS([query])
++AT_CHECK([
++RPMDB_INIT
++runroot rpm \
++  --nodeps \
++  -i /data/RPMS/hello-1.0-1.i386.rpm
++runroot rpm \
++  -qf /usr/local/bin/hello
++],
++[0],
++[hello-1.0-1.i386
++],
++[])
++AT_CLEANUP
++
++AT_SETUP([rpm -qf on non-installed file])
++AT_KEYWORDS([query])
++AT_CHECK([
++RPMDB_INIT
++runroot rpm \
++  --nodeps \
++  --excludedocs \
++  -i /data/RPMS/hello-1.0-1.i386.rpm
++runroot rpm \
++  -qf /usr/share/doc/hello-1.0/FAQ
++],
++[1],
++[],
++[error: file /usr/share/doc/hello-1.0/FAQ: No such file or directory
++])
++AT_CLEANUP
++
++AT_SETUP([rpm -q --path on non-installed file])
++AT_KEYWORDS([query])
++AT_CHECK([
++RPMDB_INIT
++runroot rpm \
++  --nodeps \
++  --excludedocs \
++  -i /data/RPMS/hello-1.0-1.i386.rpm
++runroot rpm \
++  -q --path /usr/share/doc/hello-1.0/FAQ
++],
++[0],
++[hello-1.0-1.i386
++],
++[])
++AT_CLEANUP
++
+ # ------------------------------
+ AT_SETUP([integer array query])
+ AT_KEYWORDS([query])
+-- 
+2.35.1
+

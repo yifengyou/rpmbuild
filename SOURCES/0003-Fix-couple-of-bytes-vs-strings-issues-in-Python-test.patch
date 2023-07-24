@@ -1,0 +1,44 @@
+From 6525a9bf1529944741f273cb9fde5619f006a673 Mon Sep 17 00:00:00 2001
+Message-Id: <6525a9bf1529944741f273cb9fde5619f006a673.1571920849.git.pmatilai@redhat.com>
+In-Reply-To: <6b6c4d881dc6fc99f949dac4aaf9a513542f9956.1571920849.git.pmatilai@redhat.com>
+References: <6b6c4d881dc6fc99f949dac4aaf9a513542f9956.1571920849.git.pmatilai@redhat.com>
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Thu, 4 Oct 2018 17:41:19 +0300
+Subject: [PATCH 3/5] Fix couple of bytes vs strings issues in Python tests
+
+For the purposes of rpmio testing and importing public key, we're
+dealing with bytes rather than encoded strings. In the carefree days
+of Python 2 such details didn't matter, in Python 3 they cause failures.
+The signed package test still fails after this one but it's due to
+a more general issue.
+
+(cherry picked from commit 86f7898dd6a7fa8718c02675f5a7ee04ff987422)
+---
+ tests/rpmpython.at | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tests/rpmpython.at b/tests/rpmpython.at
+index 1daaf1216..ae020ae95 100644
+--- a/tests/rpmpython.at
++++ b/tests/rpmpython.at
+@@ -33,7 +33,7 @@ prexp(mname)
+ [])
+ 
+ RPMPY_TEST([basic rpmio],[
+-msg = 'Killroy was here\n'
++msg = b'Killroy was here\n'
+ data = msg * 10
+ # TODO: test other compression types too if built in
+ for iot in [ 'fpio', 'fdio', 'ufdio', 'gzdio' ]:
+@@ -173,7 +173,7 @@ except rpm.error as e:
+ 
+ RPMPY_TEST([reading a signed package file 2],[
+ 
+-keydata = open('${RPMDATA}/keys/rpm.org-rsa-2048-test.pub').read()
++keydata = open('${RPMDATA}/keys/rpm.org-rsa-2048-test.pub', 'rb').read()
+ pubkey = rpm.pubkey(keydata)
+ keyring = rpm.keyring()
+ keyring.addKey(pubkey)
+-- 
+2.21.0
+

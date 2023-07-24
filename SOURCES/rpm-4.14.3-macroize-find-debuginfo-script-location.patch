@@ -1,0 +1,38 @@
+From 77007d68782b66f2d00d7b200516731246876dca Mon Sep 17 00:00:00 2001
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Thu, 27 May 2021 13:58:58 +0300
+Subject: [PATCH] Macroize find-debuginfo script location
+
+Makes it easier to handle varying paths, mainly in preparation for the
+next step.
+
+Backported for 4.14.3.
+---
+ macros.in | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/macros.in b/macros.in
+index a6069ee4d..be28a3b28 100644
+--- a/macros.in
++++ b/macros.in
+@@ -82,6 +82,8 @@
+ %__remsh		%{__rsh}
+ %__strip		@__STRIP@
+ 
++%__find_debuginfo	%{_rpmconfigdir}/find-debuginfo.sh
++
+ # XXX avoid failures if tools are not installed when rpm is built.
+ %__libtoolize		libtoolize
+ %__aclocal		aclocal
+@@ -177,7 +179,7 @@
+ #	the script.  See the script for details.
+ #
+ %__debug_install_post   \
+-    %{_rpmconfigdir}/find-debuginfo.sh \\\
++    %{__find_debuginfo} \\\
+     %{?_smp_mflags} \\\
+     %{?_missing_build_ids_terminate_build:--strict-build-id} \\\
+     %{?_no_recompute_build_ids:-n} \\\
+-- 
+2.33.1
+

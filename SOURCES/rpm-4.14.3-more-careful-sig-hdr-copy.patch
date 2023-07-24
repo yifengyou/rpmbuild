@@ -1,0 +1,162 @@
+commit d6a86b5e69e46cc283b1e06c92343319beb42e21
+Author: Panu Matilainen <pmatilai@redhat.com>
+Date:   Thu Mar 4 13:21:19 2021 +0200
+
+    Be much more careful about copying data from the signature header
+    
+    Only look for known tags, and ensure correct type and size where known
+    before copying over. Bump the old arbitrary 16k count limit to 16M limit
+    though, it's not inconceivable that a package could have that many files.
+    While at it, ensure none of these tags exist in the main header,
+    which would confuse us greatly.
+    
+    This is optimized for backporting ease, upstream can remove redundancies
+    and further improve checking later.
+    
+    Reported and initial patches by Demi Marie Obenour.
+    
+    Fixes: RhBug:1935049, RhBug:1933867, RhBug:1935035, RhBug:1934125, ...
+    
+    Fixes: CVE-2021-3421, CVE-2021-20271
+
+    Combined with e2f1f1931c5ccf3ecbe4e1e12cacb1e17a277776 and backported into
+    4.14.3
+
+diff -up rpm-4.14.3/lib/package.c.orig rpm-4.14.3/lib/package.c
+--- rpm-4.14.3/lib/package.c.orig	2021-05-31 12:32:49.970393976 +0200
++++ rpm-4.14.3/lib/package.c	2021-05-31 13:53:58.250673275 +0200
+@@ -31,76 +31,72 @@ struct pkgdata_s {
+     rpmRC rc;
+ };
+ 
++struct taglate_s {
++    rpmTagVal stag;
++    rpmTagVal xtag;
++    rpm_count_t count;
++    int quirk;
++} const xlateTags[] = {
++    { RPMSIGTAG_SIZE, RPMTAG_SIGSIZE, 1, 0 },
++    { RPMSIGTAG_PGP, RPMTAG_SIGPGP, 0, 0 },
++    { RPMSIGTAG_MD5, RPMTAG_SIGMD5, 16, 0 },
++    { RPMSIGTAG_GPG, RPMTAG_SIGGPG, 0, 0 },
++    /* { RPMSIGTAG_PGP5, RPMTAG_SIGPGP5, 0, 0 }, */ /* long obsolete, dont use */
++    { RPMSIGTAG_PAYLOADSIZE, RPMTAG_ARCHIVESIZE, 1, 1 },
++    { RPMSIGTAG_SHA1, RPMTAG_SHA1HEADER, 1, 0 },
++    { RPMSIGTAG_SHA256, RPMTAG_SHA256HEADER, 1, 0 },
++    { RPMSIGTAG_DSA, RPMTAG_DSAHEADER, 0, 0 },
++    { RPMSIGTAG_RSA, RPMTAG_RSAHEADER, 0, 0 },
++    { RPMSIGTAG_LONGSIZE, RPMTAG_LONGSIGSIZE, 1, 0 },
++    { RPMSIGTAG_LONGARCHIVESIZE, RPMTAG_LONGARCHIVESIZE, 1, 0 },
++    { 0 }
++};
++
+ /** \ingroup header
+  * Translate and merge legacy signature tags into header.
+  * @param h		header (dest)
+  * @param sigh		signature header (src)
++ * @return		failing tag number, 0 on success
+  */
+ static
+-void headerMergeLegacySigs(Header h, Header sigh)
++rpmTagVal headerMergeLegacySigs(Header h, Header sigh, char **msg)
+ {
+-    HeaderIterator hi;
++    const struct taglate_s *xl;
+     struct rpmtd_s td;
+ 
+-    hi = headerInitIterator(sigh);
+-    for (; headerNext(hi, &td); rpmtdFreeData(&td))
+-    {
+-	switch (td.tag) {
+-	/* XXX Translate legacy signature tag values. */
+-	case RPMSIGTAG_SIZE:
+-	    td.tag = RPMTAG_SIGSIZE;
+-	    break;
+-	case RPMSIGTAG_PGP:
+-	    td.tag = RPMTAG_SIGPGP;
+-	    break;
+-	case RPMSIGTAG_MD5:
+-	    td.tag = RPMTAG_SIGMD5;
+-	    break;
+-	case RPMSIGTAG_GPG:
+-	    td.tag = RPMTAG_SIGGPG;
+-	    break;
+-	case RPMSIGTAG_PGP5:
+-	    td.tag = RPMTAG_SIGPGP5;
+-	    break;
+-	case RPMSIGTAG_PAYLOADSIZE:
+-	    td.tag = RPMTAG_ARCHIVESIZE;
+-	    break;
+-	case RPMSIGTAG_SHA1:
+-	case RPMSIGTAG_SHA256:
+-	case RPMSIGTAG_DSA:
+-	case RPMSIGTAG_RSA:
+-	default:
+-	    if (!(td.tag >= HEADER_SIGBASE && td.tag < HEADER_TAGBASE))
++    rpmtdReset(&td);
++    for (xl = xlateTags; xl->stag; xl++) {
++	/* There mustn't be one in the main header */
++	if (headerIsEntry(h, xl->xtag)) {
++	    /* Some tags may exist in either header, but never both */
++	    if (xl->quirk && !headerIsEntry(sigh, xl->stag))
+ 		continue;
+ 	    break;
+ 	}
+-	if (!headerIsEntry(h, td.tag)) {
+-	    switch (td.type) {
+-	    case RPM_NULL_TYPE:
+-		continue;
++	if (headerGet(sigh, xl->stag, &td, HEADERGET_RAW|HEADERGET_MINMEM)) {
++	    /* Translate legacy tags */
++	    if (xl->stag != xl->xtag)
++		td.tag = xl->xtag;
++	    /* Ensure type and tag size match expectations */
++	    if (td.type != rpmTagGetTagType(td.tag))
+ 		break;
+-	    case RPM_CHAR_TYPE:
+-	    case RPM_INT8_TYPE:
+-	    case RPM_INT16_TYPE:
+-	    case RPM_INT32_TYPE:
+-	    case RPM_INT64_TYPE:
+-		if (td.count != 1)
+-		    continue;
++	    if (td.count < 1 || td.count > 16*1024*1024)
+ 		break;
+-	    case RPM_STRING_TYPE:
+-	    case RPM_BIN_TYPE:
+-		if (td.count >= 16*1024)
+-		    continue;
++	    if (xl->count && td.count != xl->count)
+ 		break;
+-	    case RPM_STRING_ARRAY_TYPE:
+-	    case RPM_I18NSTRING_TYPE:
+-		continue;
++	    if (!headerPut(h, &td, HEADERPUT_DEFAULT))
+ 		break;
+-	    }
+-	    (void) headerPut(h, &td, HEADERPUT_DEFAULT);
++	    rpmtdFreeData(&td);
+ 	}
+     }
+-    headerFreeIterator(hi);
++    rpmtdFreeData(&td);
++
++    if (xl->stag) {
++	rasprintf(msg, "invalid signature tag %s (%d)",
++			rpmTagGetName(xl->xtag), xl->xtag);
++    }
++
++    return xl->stag;
+ }
+ 
+ /**
+@@ -363,7 +359,8 @@ rpmRC rpmReadPackageFile(rpmts ts, FD_t
+ 		goto exit;
+ 
+ 	    /* Append (and remap) signature tags to the metadata. */
+-	    headerMergeLegacySigs(h, sigh);
++	    if (headerMergeLegacySigs(h, sigh, &msg))
++		goto exit;
+ 	    applyRetrofits(h);
+ 
+ 	    /* Bump reference count for return. */

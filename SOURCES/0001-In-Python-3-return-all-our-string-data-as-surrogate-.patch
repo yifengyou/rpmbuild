@@ -1,0 +1,656 @@
+From 84920f898315d09a57a3f1067433eaeb7de5e830 Mon Sep 17 00:00:00 2001
+Message-Id: <84920f898315d09a57a3f1067433eaeb7de5e830.1554884444.git.pmatilai@redhat.com>
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Fri, 22 Feb 2019 19:44:16 +0200
+Subject: [PATCH] In Python 3, return all our string data as surrogate-escaped
+ utf-8 strings
+
+In the almost ten years of rpm sort of supporting Python 3 bindings, quite
+obviously nobody has actually tried to use them. There's a major mismatch
+between what the header API outputs (bytes) and what all the other APIs
+accept (strings), resulting in hysterical TypeErrors all over the place,
+including but not limited to labelCompare() (RhBug:1631292). Also a huge
+number of other places have been returning strings and silently assuming
+utf-8 through use of Py_BuildValue("s", ...), which will just irrevocably
+fail when non-utf8 data is encountered.
+
+The politically Python 3-correct solution would be declaring all our data
+as bytes with unspecified encoding - that's exactly what it historically is.
+However doing so would by definition break every single rpm script people
+have developed on Python 2. And when 99% of the rpm content in the world
+actually is utf-8 encoded even if it doesn't say so (and in recent times
+packages even advertise themselves as utf-8 encoded), the bytes-only route
+seems a wee bit too draconian, even to this grumpy old fella.
+
+Instead, route all our string returns through a single helper macro
+which on Python 2 just does what we always did, but in Python 3 converts
+the data to surrogate-escaped utf-8 strings. This makes stuff "just work"
+out of the box pretty much everywhere even with Python 3 (including
+our own test-suite!), while still allowing to handle the non-utf8 case.
+Handling the non-utf8 case is a bit more uglier but still possible,
+which is exactly how you want corner-cases to be. There might be some
+uses for retrieving raw byte data from the header, but worrying about
+such an API is a case for some other rainy day, for now we mostly only
+care that stuff works again.
+
+Also add test-cases for mixed data source labelCompare() and
+non-utf8 insert to + retrieve from header.
+---
+ python/header-py.c     |  2 +-
+ python/rpmds-py.c      |  8 ++++----
+ python/rpmfd-py.c      |  6 +++---
+ python/rpmfi-py.c      | 24 ++++++++++++------------
+ python/rpmfiles-py.c   | 26 +++++++++++++-------------
+ python/rpmkeyring-py.c |  2 +-
+ python/rpmmacro-py.c   |  2 +-
+ python/rpmmodule.c     |  2 +-
+ python/rpmps-py.c      |  8 ++++----
+ python/rpmstrpool-py.c |  2 +-
+ python/rpmsystem-py.h  |  7 +++++++
+ python/rpmtd-py.c      |  2 +-
+ python/rpmte-py.c      | 16 ++++++++--------
+ python/rpmts-py.c      | 11 ++++++-----
+ python/spec-py.c       |  8 ++++----
+ tests/local.at         |  1 +
+ tests/rpmpython.at     | 34 ++++++++++++++++++++++++++++++++++
+ 17 files changed, 102 insertions(+), 59 deletions(-)
+
+diff --git a/python/header-py.c b/python/header-py.c
+index c9d54e869..93c241cb7 100644
+--- a/python/header-py.c
++++ b/python/header-py.c
+@@ -231,7 +231,7 @@ static PyObject * hdrFormat(hdrObject * s, PyObject * args, PyObject * kwds)
+ 	return NULL;
+     }
+ 
+-    result = Py_BuildValue("s", r);
++    result = utf8FromString(r);
+     free(r);
+ 
+     return result;
+diff --git a/python/rpmds-py.c b/python/rpmds-py.c
+index 39b26628e..ecc9af9d5 100644
+--- a/python/rpmds-py.c
++++ b/python/rpmds-py.c
+@@ -31,19 +31,19 @@ rpmds_Ix(rpmdsObject * s)
+ static PyObject *
+ rpmds_DNEVR(rpmdsObject * s)
+ {
+-    return Py_BuildValue("s", rpmdsDNEVR(s->ds));
++    return utf8FromString(rpmdsDNEVR(s->ds));
+ }
+ 
+ static PyObject *
+ rpmds_N(rpmdsObject * s)
+ {
+-    return Py_BuildValue("s", rpmdsN(s->ds));
++    return utf8FromString(rpmdsN(s->ds));
+ }
+ 
+ static PyObject *
+ rpmds_EVR(rpmdsObject * s)
+ {
+-    return Py_BuildValue("s", rpmdsEVR(s->ds));
++    return utf8FromString(rpmdsEVR(s->ds));
+ }
+ 
+ static PyObject *
+@@ -261,7 +261,7 @@ rpmds_subscript(rpmdsObject * s, PyObject * key)
+ 
+     ix = (int) PyInt_AsLong(key);
+     rpmdsSetIx(s->ds, ix);
+-    return Py_BuildValue("s", rpmdsDNEVR(s->ds));
++    return utf8FromString(rpmdsDNEVR(s->ds));
+ }
+ 
+ static PyMappingMethods rpmds_as_mapping = {
+diff --git a/python/rpmfd-py.c b/python/rpmfd-py.c
+index 85fb0cd24..4b05cce5f 100644
+--- a/python/rpmfd-py.c
++++ b/python/rpmfd-py.c
+@@ -327,17 +327,17 @@ static PyObject *rpmfd_get_closed(rpmfdObject *s)
+ static PyObject *rpmfd_get_name(rpmfdObject *s)
+ {
+     /* XXX: rpm returns non-paths with [mumble], python files use <mumble> */
+-    return Py_BuildValue("s", Fdescr(s->fd));
++    return utf8FromString(Fdescr(s->fd));
+ }
+ 
+ static PyObject *rpmfd_get_mode(rpmfdObject *s)
+ {
+-    return Py_BuildValue("s", s->mode);
++    return utf8FromString(s->mode);
+ }
+ 
+ static PyObject *rpmfd_get_flags(rpmfdObject *s)
+ {
+-    return Py_BuildValue("s", s->flags);
++    return utf8FromString(s->flags);
+ }
+ 
+ static PyGetSetDef rpmfd_getseters[] = {
+diff --git a/python/rpmfi-py.c b/python/rpmfi-py.c
+index 8d2f926d0..db405c231 100644
+--- a/python/rpmfi-py.c
++++ b/python/rpmfi-py.c
+@@ -41,19 +41,19 @@ rpmfi_DX(rpmfiObject * s, PyObject * unused)
+ static PyObject *
+ rpmfi_BN(rpmfiObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmfiBN(s->fi));
++    return utf8FromString(rpmfiBN(s->fi));
+ }
+ 
+ static PyObject *
+ rpmfi_DN(rpmfiObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmfiDN(s->fi));
++    return utf8FromString(rpmfiDN(s->fi));
+ }
+ 
+ static PyObject *
+ rpmfi_FN(rpmfiObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmfiFN(s->fi));
++    return utf8FromString(rpmfiFN(s->fi));
+ }
+ 
+ static PyObject *
+@@ -98,7 +98,7 @@ rpmfi_Digest(rpmfiObject * s, PyObject * unused)
+ {
+     char *digest = rpmfiFDigestHex(s->fi, NULL);
+     if (digest) {
+-	PyObject *dig = Py_BuildValue("s", digest);
++	PyObject *dig = utf8FromString(digest);
+ 	free(digest);
+ 	return dig;
+     } else {
+@@ -109,7 +109,7 @@ rpmfi_Digest(rpmfiObject * s, PyObject * unused)
+ static PyObject *
+ rpmfi_FLink(rpmfiObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmfiFLink(s->fi));
++    return utf8FromString(rpmfiFLink(s->fi));
+ }
+ 
+ static PyObject *
+@@ -133,13 +133,13 @@ rpmfi_FMtime(rpmfiObject * s, PyObject * unused)
+ static PyObject *
+ rpmfi_FUser(rpmfiObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmfiFUser(s->fi));
++    return utf8FromString(rpmfiFUser(s->fi));
+ }
+ 
+ static PyObject *
+ rpmfi_FGroup(rpmfiObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmfiFGroup(s->fi));
++    return utf8FromString(rpmfiFGroup(s->fi));
+ }
+ 
+ static PyObject *
+@@ -155,7 +155,7 @@ rpmfi_FClass(rpmfiObject * s, PyObject * unused)
+ 
+     if ((FClass = rpmfiFClass(s->fi)) == NULL)
+ 	FClass = "";
+-    return Py_BuildValue("s", FClass);
++    return utf8FromString(FClass);
+ }
+ 
+ static PyObject *
+@@ -208,7 +208,7 @@ rpmfi_iternext(rpmfiObject * s)
+ 	    Py_INCREF(Py_None);
+ 	    PyTuple_SET_ITEM(result, 0, Py_None);
+ 	} else
+-	    PyTuple_SET_ITEM(result,  0, Py_BuildValue("s", FN));
++	    PyTuple_SET_ITEM(result,  0, utf8FromString(FN));
+ 	PyTuple_SET_ITEM(result,  1, PyLong_FromLongLong(FSize));
+ 	PyTuple_SET_ITEM(result,  2, PyInt_FromLong(FMode));
+ 	PyTuple_SET_ITEM(result,  3, PyInt_FromLong(FMtime));
+@@ -222,12 +222,12 @@ rpmfi_iternext(rpmfiObject * s)
+ 	    Py_INCREF(Py_None);
+ 	    PyTuple_SET_ITEM(result, 10, Py_None);
+ 	} else
+-	    PyTuple_SET_ITEM(result, 10, Py_BuildValue("s", FUser));
++	    PyTuple_SET_ITEM(result, 10, utf8FromString(FUser));
+ 	if (FGroup == NULL) {
+ 	    Py_INCREF(Py_None);
+ 	    PyTuple_SET_ITEM(result, 11, Py_None);
+ 	} else
+-	    PyTuple_SET_ITEM(result, 11, Py_BuildValue("s", FGroup));
++	    PyTuple_SET_ITEM(result, 11, utf8FromString(FGroup));
+ 	PyTuple_SET_ITEM(result, 12, rpmfi_Digest(s, NULL));
+ 
+     } else
+@@ -313,7 +313,7 @@ rpmfi_subscript(rpmfiObject * s, PyObject * key)
+ 
+     ix = (int) PyInt_AsLong(key);
+     rpmfiSetFX(s->fi, ix);
+-    return Py_BuildValue("s", rpmfiFN(s->fi));
++    return utf8FromString(rpmfiFN(s->fi));
+ }
+ 
+ static PyMappingMethods rpmfi_as_mapping = {
+diff --git a/python/rpmfiles-py.c b/python/rpmfiles-py.c
+index bc07dbeaf..557246cae 100644
+--- a/python/rpmfiles-py.c
++++ b/python/rpmfiles-py.c
+@@ -41,37 +41,37 @@ static PyObject *rpmfile_dx(rpmfileObject *s)
+ static PyObject *rpmfile_name(rpmfileObject *s)
+ {
+     char * fn = rpmfilesFN(s->files, s->ix);
+-    PyObject *o = Py_BuildValue("s", fn);
++    PyObject *o = utf8FromString(fn);
+     free(fn);
+     return o;
+ }
+ 
+ static PyObject *rpmfile_basename(rpmfileObject *s)
+ {
+-    return Py_BuildValue("s", rpmfilesBN(s->files, s->ix));
++    return utf8FromString(rpmfilesBN(s->files, s->ix));
+ }
+ 
+ static PyObject *rpmfile_dirname(rpmfileObject *s)
+ {
+-    return Py_BuildValue("s", rpmfilesDN(s->files, rpmfilesDI(s->files, s->ix)));
++    return utf8FromString(rpmfilesDN(s->files, rpmfilesDI(s->files, s->ix)));
+ }
+ 
+ static PyObject *rpmfile_orig_name(rpmfileObject *s)
+ {
+     char * fn = rpmfilesOFN(s->files, s->ix);
+-    PyObject *o = Py_BuildValue("s", fn);
++    PyObject *o = utf8FromString(fn);
+     free(fn);
+     return o;
+ }
+ 
+ static PyObject *rpmfile_orig_basename(rpmfileObject *s)
+ {
+-    return Py_BuildValue("s", rpmfilesOBN(s->files, s->ix));
++    return utf8FromString(rpmfilesOBN(s->files, s->ix));
+ }
+ 
+ static PyObject *rpmfile_orig_dirname(rpmfileObject *s)
+ {
+-    return Py_BuildValue("s", rpmfilesODN(s->files, rpmfilesODI(s->files, s->ix)));
++    return utf8FromString(rpmfilesODN(s->files, rpmfilesODI(s->files, s->ix)));
+ }
+ static PyObject *rpmfile_mode(rpmfileObject *s)
+ {
+@@ -105,17 +105,17 @@ static PyObject *rpmfile_nlink(rpmfileObject *s)
+ 
+ static PyObject *rpmfile_linkto(rpmfileObject *s)
+ {
+-    return Py_BuildValue("s", rpmfilesFLink(s->files, s->ix));
++    return utf8FromString(rpmfilesFLink(s->files, s->ix));
+ }
+ 
+ static PyObject *rpmfile_user(rpmfileObject *s)
+ {
+-    return Py_BuildValue("s", rpmfilesFUser(s->files, s->ix));
++    return utf8FromString(rpmfilesFUser(s->files, s->ix));
+ }
+ 
+ static PyObject *rpmfile_group(rpmfileObject *s)
+ {
+-    return Py_BuildValue("s", rpmfilesFGroup(s->files, s->ix));
++    return utf8FromString(rpmfilesFGroup(s->files, s->ix));
+ }
+ 
+ static PyObject *rpmfile_fflags(rpmfileObject *s)
+@@ -145,7 +145,7 @@ static PyObject *rpmfile_digest(rpmfileObject *s)
+ 						  NULL, &diglen);
+     if (digest) {
+ 	char * hex = pgpHexStr(digest, diglen);
+-	PyObject *o = Py_BuildValue("s", hex);
++	PyObject *o = utf8FromString(hex);
+ 	free(hex);
+ 	return o;
+     }
+@@ -154,17 +154,17 @@ static PyObject *rpmfile_digest(rpmfileObject *s)
+ 
+ static PyObject *rpmfile_class(rpmfileObject *s)
+ {
+-    return Py_BuildValue("s", rpmfilesFClass(s->files, s->ix));
++    return utf8FromString(rpmfilesFClass(s->files, s->ix));
+ }
+ 
+ static PyObject *rpmfile_caps(rpmfileObject *s)
+ {
+-    return Py_BuildValue("s", rpmfilesFCaps(s->files, s->ix));
++    return utf8FromString(rpmfilesFCaps(s->files, s->ix));
+ }
+ 
+ static PyObject *rpmfile_langs(rpmfileObject *s)
+ {
+-    return Py_BuildValue("s", rpmfilesFLangs(s->files, s->ix));
++    return utf8FromString(rpmfilesFLangs(s->files, s->ix));
+ }
+ 
+ static PyObject *rpmfile_links(rpmfileObject *s)
+diff --git a/python/rpmkeyring-py.c b/python/rpmkeyring-py.c
+index d5f131e42..8968e0513 100644
+--- a/python/rpmkeyring-py.c
++++ b/python/rpmkeyring-py.c
+@@ -38,7 +38,7 @@ static PyObject *rpmPubkey_new(PyTypeObject *subtype,
+ static PyObject * rpmPubkey_Base64(rpmPubkeyObject *s)
+ {
+     char *b64 = rpmPubkeyBase64(s->pubkey);
+-    PyObject *res = Py_BuildValue("s", b64);
++    PyObject *res = utf8FromString(b64);
+     free(b64);
+     return res;
+ }
+diff --git a/python/rpmmacro-py.c b/python/rpmmacro-py.c
+index 3cb1a51f5..d8a365547 100644
+--- a/python/rpmmacro-py.c
++++ b/python/rpmmacro-py.c
+@@ -52,7 +52,7 @@ rpmmacro_ExpandMacro(PyObject * self, PyObject * args, PyObject * kwds)
+ 	if (rpmExpandMacros(NULL, macro, &str, 0) < 0)
+ 	    PyErr_SetString(pyrpmError, "error expanding macro");
+ 	else
+-	    res = Py_BuildValue("s", str);
++	    res = utf8FromString(str);
+ 	free(str);
+     }
+     return res;
+diff --git a/python/rpmmodule.c b/python/rpmmodule.c
+index 3faad23c7..05032edc7 100644
+--- a/python/rpmmodule.c
++++ b/python/rpmmodule.c
+@@ -237,7 +237,7 @@ static void addRpmTags(PyObject *module)
+ 
+ 	PyModule_AddIntConstant(module, tagname, tagval);
+ 	pyval = PyInt_FromLong(tagval);
+-	pyname = Py_BuildValue("s", shortname);
++	pyname = utf8FromString(shortname);
+ 	PyDict_SetItem(dict, pyval, pyname);
+ 	Py_DECREF(pyval);
+ 	Py_DECREF(pyname);
+diff --git a/python/rpmps-py.c b/python/rpmps-py.c
+index bdc899a60..902b2ae63 100644
+--- a/python/rpmps-py.c
++++ b/python/rpmps-py.c
+@@ -18,12 +18,12 @@ static PyObject *rpmprob_get_type(rpmProblemObject *s, void *closure)
+ 
+ static PyObject *rpmprob_get_pkgnevr(rpmProblemObject *s, void *closure)
+ {
+-    return Py_BuildValue("s", rpmProblemGetPkgNEVR(s->prob));
++    return utf8FromString(rpmProblemGetPkgNEVR(s->prob));
+ }
+ 
+ static PyObject *rpmprob_get_altnevr(rpmProblemObject *s, void *closure)
+ {
+-    return Py_BuildValue("s", rpmProblemGetAltNEVR(s->prob));
++    return utf8FromString(rpmProblemGetAltNEVR(s->prob));
+ }
+ 
+ static PyObject *rpmprob_get_key(rpmProblemObject *s, void *closure)
+@@ -38,7 +38,7 @@ static PyObject *rpmprob_get_key(rpmProblemObject *s, void *closure)
+ 
+ static PyObject *rpmprob_get_str(rpmProblemObject *s, void *closure)
+ {
+-    return Py_BuildValue("s", rpmProblemGetStr(s->prob));
++    return utf8FromString(rpmProblemGetStr(s->prob));
+ }
+ 
+ static PyObject *rpmprob_get_num(rpmProblemObject *s, void *closure)
+@@ -59,7 +59,7 @@ static PyGetSetDef rpmprob_getseters[] = {
+ static PyObject *rpmprob_str(rpmProblemObject *s)
+ {
+     char *str = rpmProblemString(s->prob);
+-    PyObject *res = Py_BuildValue("s", str);
++    PyObject *res = utf8FromString(str);
+     free(str);
+     return res;
+ }
+diff --git a/python/rpmstrpool-py.c b/python/rpmstrpool-py.c
+index 356bd1de5..a56e2b540 100644
+--- a/python/rpmstrpool-py.c
++++ b/python/rpmstrpool-py.c
+@@ -44,7 +44,7 @@ static PyObject *strpool_id2str(rpmstrPoolObject *s, PyObject *item)
+ 	const char *str = rpmstrPoolStr(s->pool, id);
+ 
+ 	if (str)
+-	    ret = PyBytes_FromString(str);
++	    ret = utf8FromString(str);
+ 	else 
+ 	    PyErr_SetObject(PyExc_KeyError, item);
+     }
+diff --git a/python/rpmsystem-py.h b/python/rpmsystem-py.h
+index 955d60cd3..87c750571 100644
+--- a/python/rpmsystem-py.h
++++ b/python/rpmsystem-py.h
+@@ -19,4 +19,11 @@
+ #define PyInt_AsSsize_t PyLong_AsSsize_t
+ #endif
+ 
++/* In Python 3, we return all strings as surrogate-escaped utf-8 */
++#if PY_MAJOR_VERSION >= 3
++#define utf8FromString(_s) PyUnicode_DecodeUTF8(_s, strlen(_s), "surrogateescape")
++#else
++#define utf8FromString(_s) PyBytes_FromString(_s)
++#endif
++
+ #endif	/* H_SYSTEM_PYTHON */
+diff --git a/python/rpmtd-py.c b/python/rpmtd-py.c
+index 247c7502a..23ca10517 100644
+--- a/python/rpmtd-py.c
++++ b/python/rpmtd-py.c
+@@ -17,7 +17,7 @@ PyObject * rpmtd_ItemAsPyobj(rpmtd td, rpmTagClass tclass)
+ 
+     switch (tclass) {
+     case RPM_STRING_CLASS:
+-	res = PyBytes_FromString(rpmtdGetString(td));
++	res = utf8FromString(rpmtdGetString(td));
+ 	break;
+     case RPM_NUMERIC_CLASS:
+ 	res = PyLong_FromLongLong(rpmtdGetNumber(td));
+diff --git a/python/rpmte-py.c b/python/rpmte-py.c
+index 99ff2f496..2b3745754 100644
+--- a/python/rpmte-py.c
++++ b/python/rpmte-py.c
+@@ -54,49 +54,49 @@ rpmte_TEType(rpmteObject * s, PyObject * unused)
+ static PyObject *
+ rpmte_N(rpmteObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmteN(s->te));
++    return utf8FromString(rpmteN(s->te));
+ }
+ 
+ static PyObject *
+ rpmte_E(rpmteObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmteE(s->te));
++    return utf8FromString(rpmteE(s->te));
+ }
+ 
+ static PyObject *
+ rpmte_V(rpmteObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmteV(s->te));
++    return utf8FromString(rpmteV(s->te));
+ }
+ 
+ static PyObject *
+ rpmte_R(rpmteObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmteR(s->te));
++    return utf8FromString(rpmteR(s->te));
+ }
+ 
+ static PyObject *
+ rpmte_A(rpmteObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmteA(s->te));
++    return utf8FromString(rpmteA(s->te));
+ }
+ 
+ static PyObject *
+ rpmte_O(rpmteObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmteO(s->te));
++    return utf8FromString(rpmteO(s->te));
+ }
+ 
+ static PyObject *
+ rpmte_NEVR(rpmteObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmteNEVR(s->te));
++    return utf8FromString(rpmteNEVR(s->te));
+ }
+ 
+ static PyObject *
+ rpmte_NEVRA(rpmteObject * s, PyObject * unused)
+ {
+-    return Py_BuildValue("s", rpmteNEVRA(s->te));
++    return utf8FromString(rpmteNEVRA(s->te));
+ }
+ 
+ static PyObject *
+diff --git a/python/rpmts-py.c b/python/rpmts-py.c
+index 1ddfc9a1e..96e3bb28e 100644
+--- a/python/rpmts-py.c
++++ b/python/rpmts-py.c
+@@ -230,8 +230,9 @@ rpmts_SolveCallback(rpmts ts, rpmds ds, const void * data)
+ 
+     PyEval_RestoreThread(cbInfo->_save);
+ 
+-    args = Py_BuildValue("(Oissi)", cbInfo->tso,
+-		rpmdsTagN(ds), rpmdsN(ds), rpmdsEVR(ds), rpmdsFlags(ds));
++    args = Py_BuildValue("(OiNNi)", cbInfo->tso,
++		rpmdsTagN(ds), utf8FromString(rpmdsN(ds)),
++		utf8FromString(rpmdsEVR(ds)), rpmdsFlags(ds));
+     result = PyEval_CallObject(cbInfo->cb, args);
+     Py_DECREF(args);
+ 
+@@ -409,7 +410,7 @@ rpmts_HdrCheck(rpmtsObject * s, PyObject *obj)
+     rpmrc = headerCheck(s->ts, uh, uc, &msg);
+     Py_END_ALLOW_THREADS;
+ 
+-    return Py_BuildValue("(is)", rpmrc, msg);
++    return Py_BuildValue("(iN)", rpmrc, utf8FromString(msg));
+ }
+ 
+ static PyObject *
+@@ -500,7 +501,7 @@ rpmtsCallback(const void * hd, const rpmCallbackType what,
+     /* Synthesize a python object for callback (if necessary). */
+     if (pkgObj == NULL) {
+ 	if (h) {
+-	    pkgObj = Py_BuildValue("s", headerGetString(h, RPMTAG_NAME));
++	    pkgObj = utf8FromString(headerGetString(h, RPMTAG_NAME));
+ 	} else {
+ 	    pkgObj = Py_None;
+ 	    Py_INCREF(pkgObj);
+@@ -845,7 +846,7 @@ static PyObject *rpmts_get_tid(rpmtsObject *s, void *closure)
+ 
+ static PyObject *rpmts_get_rootDir(rpmtsObject *s, void *closure)
+ {
+-    return Py_BuildValue("s", rpmtsRootDir(s->ts));
++    return utf8FromString(rpmtsRootDir(s->ts));
+ }
+ 
+ static int rpmts_set_scriptFd(rpmtsObject *s, PyObject *value, void *closure)
+diff --git a/python/spec-py.c b/python/spec-py.c
+index 4efdbf4bf..70b796531 100644
+--- a/python/spec-py.c
++++ b/python/spec-py.c
+@@ -57,7 +57,7 @@ static PyObject *pkgGetSection(rpmSpecPkg pkg, int section)
+ {
+     char *sect = rpmSpecPkgGetSection(pkg, section);
+     if (sect != NULL) {
+-        PyObject *ps = PyBytes_FromString(sect);
++        PyObject *ps = utf8FromString(sect);
+         free(sect);
+         if (ps != NULL)
+             return ps;
+@@ -158,7 +158,7 @@ static PyObject * getSection(rpmSpec spec, int section)
+ {
+     const char *sect = rpmSpecGetSection(spec, section);
+     if (sect) {
+-	return Py_BuildValue("s", sect);
++	return utf8FromString(sect);
+     }
+     Py_RETURN_NONE;
+ }
+@@ -208,8 +208,8 @@ static PyObject * spec_get_sources(specObject *s, void *closure)
+ 
+     rpmSpecSrcIter iter = rpmSpecSrcIterInit(s->spec);
+     while ((source = rpmSpecSrcIterNext(iter)) != NULL) {
+-	PyObject *srcUrl = Py_BuildValue("(sii)",
+-				rpmSpecSrcFilename(source, 1),
++	PyObject *srcUrl = Py_BuildValue("(Nii)",
++				utf8FromString(rpmSpecSrcFilename(source, 1)),
+ 				rpmSpecSrcNum(source),
+ 				rpmSpecSrcFlags(source)); 
+         if (!srcUrl) {
+diff --git a/tests/local.at b/tests/local.at
+index 02ead66c9..42eef1c75 100644
+--- a/tests/local.at
++++ b/tests/local.at
+@@ -10,6 +10,7 @@ rm -rf "${abs_builddir}"/testing`rpm --eval '%_dbpath'`/*
+ 
+ m4_define([RPMPY_RUN],[[
+ cat << EOF > test.py
++# coding=utf-8
+ import rpm, sys
+ dbpath=rpm.expandMacro('%_dbpath')
+ rpm.addMacro('_dbpath', '${abs_builddir}/testing%s' % dbpath)
+diff --git a/tests/rpmpython.at b/tests/rpmpython.at
+index ff77f868c..58f3e84a6 100644
+--- a/tests/rpmpython.at
++++ b/tests/rpmpython.at
+@@ -106,6 +106,25 @@ None
+ 'rpm.hdr' object has no attribute '__foo__']
+ )
+ 
++RPMPY_TEST([non-utf8 data in header],[
++str = u'älämölö'
++enc = 'iso-8859-1'
++b = str.encode(enc)
++h = rpm.hdr()
++h['group'] = b
++d = h['group']
++try:
++    # python 3
++    t = bytes(d, 'utf-8', 'surrogateescape')
++except TypeError:
++    # python 2
++    t = bytes(d)
++res = t.decode(enc)
++myprint(str == res)
++],
++[True]
++)
++
+ RPMPY_TEST([invalid header data],[
+ h1 = rpm.hdr()
+ h1['basenames'] = ['bing', 'bang', 'bong']
+@@ -125,6 +144,21 @@ for h in [h1, h2]:
+ /opt/bing,/opt/bang,/flopt/bong]
+ )
+ 
++RPMPY_TEST([labelCompare],[
++v = '1.0'
++r = '1'
++e = 3
++h = rpm.hdr()
++h['name'] = 'testpkg'
++h['version'] = v
++h['release'] = r
++h['epoch'] = e
++myprint(rpm.labelCompare((str(h['epoch']), h['version'], h['release']),
++			 (str(e), v, r)))
++],
++[0]
++)
++
+ RPMPY_TEST([vfyflags API],[
+ ts = rpm.ts()
+ dlv = ts.getVfyFlags()
+-- 
+2.20.1
+

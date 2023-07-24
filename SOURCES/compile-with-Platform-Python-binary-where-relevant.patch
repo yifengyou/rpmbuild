@@ -1,0 +1,26 @@
+From 682397a8e2758058f780cccd51b570d39415b9b2 Mon Sep 17 00:00:00 2001
+From: Tomas Orsava <torsava@redhat.com>
+Date: Tue, 3 Jul 2018 14:58:32 +0200
+Subject: [PATCH] Compile with Platform-Python binary where relevant
+
+---
+ scripts/brp-python-bytecompile | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/scripts/brp-python-bytecompile b/scripts/brp-python-bytecompile
+index 7ed1d7f..9d0a421 100644
+--- a/scripts/brp-python-bytecompile
++++ b/scripts/brp-python-bytecompile
+@@ -60,6 +60,9 @@ shopt -s nullglob
+ for python_libdir in `find "$RPM_BUILD_ROOT" -type d|grep -E "/usr/lib(64)?/python[0-9]\.[0-9]$"`;
+ do
+ 	python_binary=/usr/bin/$(basename $python_libdir)
++	if [ "$python_binary" = "/usr/bin/python3.6" ]; then
++	    python_binary=/usr/libexec/platform-python
++	fi
+ 	real_libdir=${python_libdir/$RPM_BUILD_ROOT/}
+ 	echo "Bytecompiling .py files below $python_libdir using $python_binary"
+ 
+-- 
+2.14.4
+

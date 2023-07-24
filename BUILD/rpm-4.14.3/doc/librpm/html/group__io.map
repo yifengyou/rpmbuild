@@ -1,0 +1,10 @@
+<map id="I/O" name="I/O">
+<area shape="rect" id="node1" href="$group__rpmurl.html" title="A couple utils for URL Manipulation." alt="" coords="121,5,287,31"/>
+<area shape="rect" id="node2" href="$group__header.html" title="How to manipulate package headers (which carries all information about a package)." alt="" coords="155,55,253,80"/>
+<area shape="rect" id="node3" href="$group__rpmargv.html" title="Argument Manipulation API." alt="" coords="103,104,305,129"/>
+<area shape="rect" id="node4" href="$group__rpmcli.html" title="Parsing RPM command line arguments." alt="" coords="129,153,279,179"/>
+<area shape="rect" id="node5" href="$group__rpmdb.html" title="Opening &amp; accessing the RPM indices using Berkeley DB (the so called rpmdb)" alt="" coords="147,203,261,228"/>
+<area shape="rect" id="node6" href="$group__rpmio.html" title="The RPM IO API (Fd_t is RPM equivalent to libc&#39;s FILE)." alt="" coords="155,252,253,277"/>
+<area shape="rect" id="node7" title=" " alt="" coords="5,153,45,179"/>
+<area shape="rect" id="node8" href="$group__rpmfileutil.html" title="File and path manipulation helper functions." alt="" coords="93,301,315,327"/>
+</map>

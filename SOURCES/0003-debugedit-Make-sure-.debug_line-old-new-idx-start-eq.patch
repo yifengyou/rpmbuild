@@ -1,0 +1,30 @@
+From 00a0afd5e079a73ef6871f1538f34fa4e67892e6 Mon Sep 17 00:00:00 2001
+Message-Id: <00a0afd5e079a73ef6871f1538f34fa4e67892e6.1573552234.git.pmatilai@redhat.com>
+In-Reply-To: <ce6e8556a8f93327d6de0446f21ac5e549861d82.1573552234.git.pmatilai@redhat.com>
+References: <ce6e8556a8f93327d6de0446f21ac5e549861d82.1573552234.git.pmatilai@redhat.com>
+From: Mark Wielaard <mark@klomp.org>
+Date: Mon, 17 Jun 2019 11:23:26 +0200
+Subject: [PATCH 3/3] debugedit: Make sure .debug_line old/new idx start equal.
+
+Found by running the debugedit tests under valgrind.
+If the old and new .debug_line offset isn't changed then we might
+write out an uninitialized new_idx.
+---
+ tools/debugedit.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tools/debugedit.c b/tools/debugedit.c
+index 84483ef5e..9f8dcd0fb 100644
+--- a/tools/debugedit.c
++++ b/tools/debugedit.c
+@@ -1177,6 +1177,7 @@ get_line_table (DSO *dso, size_t off, struct line_table **table)
+   *table = NULL;
+ 
+   t->old_idx = off;
++  t->new_idx = off;
+   t->size_diff = 0;
+   t->replace_dirs = false;
+   t->replace_files = false;
+-- 
+2.23.0
+

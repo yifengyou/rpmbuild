@@ -1,0 +1,12 @@
+diff -up rpm-4.14.2/macros.in.pyerror rpm-4.14.2/macros.in
+--- rpm-4.14.2/macros.in.pyerror	2019-06-04 13:33:48.450727270 +0300
++++ rpm-4.14.2/macros.in	2019-06-04 13:34:09.717695822 +0300
+@@ -50,7 +50,7 @@
+ %__mv			@__MV@
+ %__patch		@__PATCH@
+ %__perl			@__PERL@
+-%__python		@__PYTHON@
++%__python		%{error:attempt to use unversioned python, define %%__python to %{_bindir}/python2 or %{_bindir}/python3 explicitly}
+ %__restorecon		@__RESTORECON@
+ %__rm			@__RM@
+ %__rsh			@__RSH@

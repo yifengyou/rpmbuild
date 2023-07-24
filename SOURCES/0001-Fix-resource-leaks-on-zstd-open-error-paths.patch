@@ -1,0 +1,50 @@
+From ed6c5573c09611ff9522ed290ef9d1ba717d8019 Mon Sep 17 00:00:00 2001
+Message-Id: <ed6c5573c09611ff9522ed290ef9d1ba717d8019.1574331915.git.pmatilai@redhat.com>
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Thu, 21 Nov 2019 12:22:45 +0200
+Subject: [PATCH] Fix resource leaks on zstd open error paths
+
+If zstd stream initialization fails, the opened fd and the stream
+itself are leaked. Handle error exit in a central label.
+---
+ rpmio/rpmio.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/rpmio/rpmio.c b/rpmio/rpmio.c
+index 243942411..10ba20cd6 100644
+--- a/rpmio/rpmio.c
++++ b/rpmio/rpmio.c
+@@ -1128,13 +1128,13 @@ static rpmzstd rpmzstdNew(int fdno, const char *fmode)
+     if ((flags & O_ACCMODE) == O_RDONLY) {	/* decompressing */
+ 	if ((_stream = (void *) ZSTD_createDStream()) == NULL
+ 	 || ZSTD_isError(ZSTD_initDStream(_stream))) {
+-	    return NULL;
++	    goto err;
+ 	}
+ 	nb = ZSTD_DStreamInSize();
+     } else {					/* compressing */
+ 	if ((_stream = (void *) ZSTD_createCStream()) == NULL
+ 	 || ZSTD_isError(ZSTD_initCStream(_stream, level))) {
+-	    return NULL;
++	    goto err;
+ 	}
+ 	nb = ZSTD_CStreamOutSize();
+     }
+@@ -1149,6 +1149,14 @@ static rpmzstd rpmzstdNew(int fdno, const char *fmode)
+     zstd->b = xmalloc(nb);
+ 
+     return zstd;
++
++err:
++    fclose(fp);
++    if ((flags & O_ACCMODE) == O_RDONLY)
++	ZSTD_freeDStream(_stream);
++    else
++	ZSTD_freeCStream(_stream);
++    return NULL;
+ }
+ 
+ static FD_t zstdFdopen(FD_t fd, int fdno, const char * fmode)
+-- 
+2.23.0
+

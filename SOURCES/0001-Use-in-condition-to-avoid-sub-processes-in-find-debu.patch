@@ -1,0 +1,29 @@
+From 9aae21d7610a7e8067ae932f36d1c8bb8583fe59 Mon Sep 17 00:00:00 2001
+From: Pavlina Moravcova Varekova <pmoravco@redhat.com>
+Date: Wed, 5 Jun 2019 06:07:00 +0200
+Subject: [PATCH] Use [ ] in condition to avoid sub processes in
+ find-debuginfo.sh (#735)
+
+Introduced in commit 1da9e83, spotted by covscan.
+
+Modified to fix another covscan warning
+---
+ scripts/find-debuginfo.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/scripts/find-debuginfo.sh b/scripts/find-debuginfo.sh
+index 23286139e..d75da1108 100755
+--- a/scripts/find-debuginfo.sh
++++ b/scripts/find-debuginfo.sh
+@@ -213,7 +213,7 @@ if test -n "$build_id_seed" -a "$no_recompute_build_id" = "true"; then
+   exit 2
+ fi
+ 
+-if ("$strip_g" = "true") && ("$strip_glibs" = "true"); then
++if [ "$strip_g" = "true" ] && [ "$strip_glibs" = "true" ]; then
+   echo >&2 "*** ERROR: -g  and --g-libs cannot be used together"
+   exit 2
+ fi
+-- 
+2.21.0
+

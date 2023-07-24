@@ -1,0 +1,275 @@
+From 820dcc1db9f2130a21fdaf721217034376eb8e38 Mon Sep 17 00:00:00 2001
+Message-Id: <820dcc1db9f2130a21fdaf721217034376eb8e38.1544785848.git.pmatilai@redhat.com>
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Fri, 30 Nov 2018 13:10:44 +0200
+Subject: [PATCH] Add support for logging audit events for package installs as
+ per OSPP v4.2
+
+If enabled at build-time, log audit events for package install, update
+and remove. The log includes the operation, package nevra, signature
+check result, whether signatures are being enforced enforced and overall
+success result. Package install/update/remove are logged as such,
+obsoletion is logged as install + remove (whereas the erasure element
+on updates is silent)
+
+Loosely based on initial RHEL 7-8 implementations by Pavlina Moravcova
+Varekova and Florian Festi (RhBug:1555326, RhBug:1607612)
+
+(cherry picked from commit cfc9dde70fe65e91c83e03e9a9441e627b741489)
+---
+ configure.ac         |  21 +++++++++
+ lib/Makefile.am      |   1 +
+ lib/rpmte.c          |  11 +++++
+ lib/rpmte_internal.h |   6 +++
+ lib/transaction.c    | 104 +++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 143 insertions(+)
+
+diff --git a/configure.ac b/configure.ac
+index 34ea85f9f..ab8a368d3 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -312,6 +312,27 @@ fi
+ AC_SUBST(WITH_BEECRYPT_LIB)
+ AC_SUBST(WITH_BEECRYPT_INCLUDE)
+ 
++
++#=================
++# Check for audit library.
++AC_ARG_WITH(audit,
++AS_HELP_STRING([--with-audit],[log results using Linux Audit]),
++with_audit=$withval,
++with_audit=auto)
++
++WITH_AUDIT_LIB=
++AS_IF([test "x$with_audit" != xno],[
++    AC_SEARCH_LIBS([audit_open],[audit],[
++    WITH_AUDIT_LIB="$ac_res"
++    AC_DEFINE(WITH_AUDIT, 1, [libaudit support])
++    ],
++       [if test "x$with_audit" != xauto; then
++		AC_MSG_ERROR([missing audit library])
++	fi
++    ])
++])
++AC_SUBST(WITH_AUDIT_LIB)
++
+ #=================
+ # Check for OpenSSL library.
+ # We need evp.h from OpenSSL.
+diff --git a/lib/Makefile.am b/lib/Makefile.am
+index baf3238ee..c055962a3 100644
+--- a/lib/Makefile.am
++++ b/lib/Makefile.am
+@@ -51,6 +51,7 @@ librpm_la_LIBADD = \
+ 	@WITH_POPT_LIB@ \
+ 	@WITH_CAP_LIB@ \
+ 	@WITH_ACL_LIB@ \
++	@WITH_AUDIT_LIB@ \
+ 	@LIBINTL@
+ 
+ if WITH_LUA
+diff --git a/lib/rpmte.c b/lib/rpmte.c
+index d980a37a4..bd5d53edc 100644
+--- a/lib/rpmte.c
++++ b/lib/rpmte.c
+@@ -69,6 +69,7 @@ struct rpmte_s {
+     int nrelocs;		/*!< (TR_ADDED) No. of relocations. */
+     uint8_t *badrelocs;		/*!< (TR_ADDED) Bad relocations (or NULL) */
+     FD_t fd;			/*!< (TR_ADDED) Payload file descriptor. */
++    int verified;		/*!< (TR_ADDED) Verification status */
+ 
+ #define RPMTE_HAVE_PRETRANS	(1 << 0)
+ #define RPMTE_HAVE_POSTTRANS	(1 << 1)
+@@ -753,6 +754,16 @@ rpmfs rpmteGetFileStates(rpmte te)
+     return te->fs;
+ }
+ 
++void rpmteSetVerified(rpmte te, int verified)
++{
++    te->verified = verified;
++}
++
++int rpmteGetVerified(rpmte te)
++{
++    return te->verified;
++}
++
+ int rpmteProcess(rpmte te, pkgGoal goal, int num)
+ {
+     /* Only install/erase resets pkg file info */
+diff --git a/lib/rpmte_internal.h b/lib/rpmte_internal.h
+index a5a991ec5..2895925ce 100644
+--- a/lib/rpmte_internal.h
++++ b/lib/rpmte_internal.h
+@@ -86,6 +86,12 @@ int rpmteHaveTransScript(rpmte te, rpmTagVal tag);
+ /* XXX should be internal too but build code needs for now... */
+ rpmfs rpmteGetFileStates(rpmte te);
+ 
++RPM_GNUC_INTERNAL
++void rpmteSetVerified(rpmte te, int verified);
++
++RPM_GNUC_INTERNAL
++int rpmteGetVerified(rpmte te);
++
+ /** \ingroup rpmte
+  * Retrieve size in bytes of package header.
+  * @param te		transaction element
+diff --git a/lib/transaction.c b/lib/transaction.c
+index 67b9db579..866e87fc2 100644
+--- a/lib/transaction.c
++++ b/lib/transaction.c
+@@ -7,6 +7,10 @@
+ #include <inttypes.h>
+ #include <libgen.h>
+ 
++#if WITH_AUDIT
++#include <libaudit.h>
++#endif
++
+ #include <rpm/rpmlib.h>		/* rpmMachineScore, rpmReadPackageFile */
+ #include <rpm/rpmmacro.h>	/* XXX for rpmExpand */
+ #include <rpm/rpmlog.h>
+@@ -1195,12 +1199,17 @@ static rpm_loff_t countPkgs(rpmts ts, rpmElementTypes types)
+ 
+ struct vfydata_s {
+     char *msg;
++    int signature;
+     int vfylevel;
+ };
+ 
+ static int vfyCb(struct rpmsinfo_s *sinfo, void *cbdata)
+ {
+     struct vfydata_s *vd = cbdata;
++
++    if (sinfo->type == RPMSIG_SIGNATURE_TYPE && sinfo->rc == RPMRC_OK)
++	vd->signature = RPMRC_OK;
++
+     switch (sinfo->rc) {
+     case RPMRC_OK:
+ 	break;
+@@ -1241,6 +1250,7 @@ static int verifyPackageFiles(rpmts ts, rpm_loff_t total)
+ 	struct rpmvs_s *vs = rpmvsCreate(vfylevel, vsflags, keyring);
+ 	struct vfydata_s vd = {
+ 	    .msg = NULL,
++	    .signature = RPMRC_NOTFOUND,
+ 	    .vfylevel = vfylevel,
+ 	};
+ 	rpmRC prc = RPMRC_FAIL;
+@@ -1255,6 +1265,9 @@ static int verifyPackageFiles(rpmts ts, rpm_loff_t total)
+ 	if (prc == RPMRC_OK)
+ 	    prc = rpmvsVerify(vs, RPMSIG_VERIFIABLE_TYPE, vfyCb, &vd);
+ 
++	/* Record verify result, signatures only for now */
++	rpmteSetVerified(p, vd.signature == RPMRC_OK);
++
+ 	if (prc)
+ 	    rpmteAddProblem(p, RPMPROB_VERIFY, NULL, vd.msg, 0);
+ 
+@@ -1619,6 +1632,95 @@ rpmRC runScript(rpmts ts, rpmte te, Header h, ARGV_const_t prefixes,
+     return rc;
+ }
+ 
++#if WITH_AUDIT
++struct teop {
++    rpmte te;
++    const char *op;
++};
++
++/*
++ * Figure out the actual operations:
++ * Install and remove are straightforward. Updates need to discovered 
++ * via their erasure element: locate the updating element, adjust it's
++ * op to update and silence the erasure part. Obsoletion is handled as
++ * as install + remove, which it technically is.
++ */
++static void getAuditOps(rpmts ts, struct teop *ops, int nelem)
++{
++    rpmtsi pi = rpmtsiInit(ts);
++    rpmte p;
++    int i = 0;
++    while ((p = rpmtsiNext(pi, 0)) != NULL) {
++	const char *op = NULL;
++	if (rpmteType(p) == TR_ADDED) {
++	    op = "install";
++	} else {
++	    op = "remove";
++	    rpmte d = rpmteDependsOn(p);
++	    /* Fixup op on updating elements, silence the cleanup stage */
++	    if (d != NULL && rstreq(rpmteN(d), rpmteN(p))) {
++		/* Linear lookup, but we're only dealing with a few thousand */
++		for (int x = 0; x < i; x++) {
++		    if (ops[x].te == d) {
++			ops[x].op = "update";
++			op = NULL;
++			break;
++		    }
++		}
++	    }
++	}
++	ops[i].te = p;
++	ops[i].op = op;
++	i++;
++    }
++    rpmtsiFree(pi);
++}
++
++/*
++ * If enabled, log audit events for the operations in this transaction.
++ * In the event values, 1 means true/success and 0 false/failure. Shockingly.
++ */
++static void rpmtsAudit(rpmts ts)
++{
++    int auditFd = audit_open();
++    if (auditFd < 0)
++	return;
++
++    int nelem = rpmtsNElements(ts);
++    struct teop *ops = xcalloc(nelem, sizeof(*ops));
++    char *dir = audit_encode_nv_string("root_dir", rpmtsRootDir(ts), 0);
++    int enforce = (rpmtsVfyLevel(ts) & RPMSIG_SIGNATURE_TYPE) != 0;
++
++    getAuditOps(ts, ops, nelem);
++
++    for (int i = 0; i < nelem; i++) {
++	const char *op = ops[i].op;
++	if (op) {
++	    rpmte p = ops[i].te;
++	    char *nevra = audit_encode_nv_string("sw", rpmteNEVRA(p), 0);
++	    char eventTxt[256];
++	    int verified = rpmteGetVerified(p);
++	    int result = (rpmteFailed(p) == 0);
++
++	    snprintf(eventTxt, sizeof(eventTxt),
++		    "op=%s %s sw_type=rpm key_enforce=%u gpg_res=%u %s",
++		    op, nevra, enforce, verified, dir);
++	    audit_log_user_comm_message(auditFd, AUDIT_SOFTWARE_UPDATE,
++				    eventTxt, NULL, NULL, NULL, NULL, result);
++	    free(nevra);
++	}
++    }
++
++    free(dir);
++    free(ops);
++    audit_close(auditFd);
++}
++#else
++static void rpmtsAudit(rpmts ts)
++{
++}
++#endif
++
+ int rpmtsRun(rpmts ts, rpmps okProbs, rpmprobFilterFlags ignoreSet)
+ {
+     int rc = -1; /* assume failure */
+@@ -1732,6 +1834,8 @@ exit:
+ 	rpmpluginsCallTsmPost(rpmtsPlugins(ts), ts, rc);
+ 
+     /* Finish up... */
++    if (!(rpmtsFlags(ts) & (RPMTRANS_FLAG_TEST|RPMTRANS_FLAG_BUILD_PROBS)))
++	rpmtsAudit(ts);
+     (void) umask(oldmask);
+     (void) rpmtsFinish(ts);
+     rpmpsFree(tsprobs);
+-- 
+2.19.2
+

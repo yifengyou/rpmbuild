@@ -1,0 +1,76 @@
+From 362c4401979f896de1e69a3e18d33954953912cc Mon Sep 17 00:00:00 2001
+Message-Id: <362c4401979f896de1e69a3e18d33954953912cc.1554983588.git.pmatilai@redhat.com>
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Tue, 11 Dec 2018 13:21:47 +0200
+Subject: [PATCH] Only read through payload on verify if actually needed
+
+If none of our verify items ranges over the payload, then why bother?
+
+To do this, add an internal rpmvs API to get it's range, and use
+that to decide whether trip over the payload is needed or not.
+In addition, the payload digest tag needs to be grabbed outside of the
+condition to avoid depending on other values. The details including
+RPMVSF_NEEDPAYLOAD will be handled internally to rpmvs which makes it
+actually nicer code-wise too.
+---
+ lib/rpmchecksig.c |  8 ++++----
+ lib/rpmvs.c       | 12 ++++++++++++
+ lib/rpmvs.h       |  3 +++
+ 3 files changed, 19 insertions(+), 4 deletions(-)
+
+diff --git a/lib/rpmchecksig.c b/lib/rpmchecksig.c
+index 1ba72a45e..810f7153d 100644
+--- a/lib/rpmchecksig.c
++++ b/lib/rpmchecksig.c
+@@ -187,11 +187,11 @@ rpmRC rpmpkgRead(struct rpmvs_s *vs, FD_t fd,
+     /* Finalize header range */
+     rpmvsFiniRange(vs, RPMSIG_HEADER);
+ 
+-    /* Unless disabled, read the payload, generating digest(s) on the fly. */
+-    if (!(rpmvsFlags(vs) & RPMVSF_NEEDPAYLOAD)) {
+-	/* Fish interesting tags from the main header. This is a bit hacky... */
+-	rpmvsAppendTag(vs, blob, RPMTAG_PAYLOADDIGEST);
++    /* Fish interesting tags from the main header. This is a bit hacky... */
++    rpmvsAppendTag(vs, blob, RPMTAG_PAYLOADDIGEST);
+ 
++    /* If needed and not explicitly disabled, read the payload as well. */
++    if (rpmvsRange(vs) & RPMSIG_PAYLOAD) {
+ 	/* Initialize digests ranging over the payload only */
+ 	rpmvsInitRange(vs, RPMSIG_PAYLOAD);
+ 
+diff --git a/lib/rpmvs.c b/lib/rpmvs.c
+index 622e48011..0d475af86 100644
+--- a/lib/rpmvs.c
++++ b/lib/rpmvs.c
+@@ -396,6 +396,18 @@ void rpmvsFiniRange(struct rpmvs_s *sis, int range)
+     }
+ }
+ 
++int rpmvsRange(struct rpmvs_s *vs)
++{
++    int range = 0;
++    for (int i = 0; i < vs->nsigs; i++) {
++	if (rpmsinfoDisabled(&vs->sigs[i], vs->vsflags))
++	    continue;
++	range |= vs->sigs[i].range;
++    }
++
++    return range;
++}
++
+ static int sinfoCmp(const void *a, const void *b)
+ {
+     const struct rpmsinfo_s *sa = a;
+--- rpm-4.14.3/lib/rpmvs.h.orig	2020-04-28 10:57:19.727347211 +0200
++++ rpm-4.14.3/lib/rpmvs.h	2020-04-28 10:57:43.622612015 +0200
+@@ -66,6 +66,8 @@
+ 
+ void rpmvsFiniRange(struct rpmvs_s *sis, int range);
+ 
++int rpmvsRange(struct rpmvs_s *vs); 
++
+ int rpmvsVerify(struct rpmvs_s *sis, int type,
+                        rpmsinfoCb cb, void *cbdata);
+ 
+-- 
+2.20.1

@@ -1,0 +1,26 @@
+From 09d181d78c16e1751779586c606e85c11f360407 Mon Sep 17 00:00:00 2001
+From: Florian Festi <ffesti@redhat.com>
+Date: Tue, 25 Jun 2019 18:04:20 +0200
+Subject: [PATCH] Use newline as a delimiter to avoid xargs messing up file
+ names with quotes
+
+which is the default behaviour otherwise.
+
+Fixes rhbz#1721348
+---
+ scripts/brp-strip-static-archive | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/scripts/brp-strip-static-archive b/scripts/brp-strip-static-archive
+index 13d9a098b..f7fb26b87 100755
+--- a/scripts/brp-strip-static-archive
++++ b/scripts/brp-strip-static-archive
+@@ -15,4 +15,4 @@ esac
+ # Strip static libraries.
+ find "$RPM_BUILD_ROOT" -type f | \
+     grep -v "^${RPM_BUILD_ROOT}/\?usr/lib/debug" | \
+-    xargs -r -P$NCPUS -n32 sh -c "file \"\$@\" | sed 's/:  */: /' | grep 'current ar archive' | sed -n -e 's/^\(.*\):[  ]*current ar archive/\1/p' | xargs -I\{\} $STRIP -g \{\}" ARG0
++    xargs -d '\n' -r -P$NCPUS -n32 sh -c "file \"\$@\" | sed 's/:  */: /' | grep 'current ar archive' | sed -n -e 's/^\(.*\):[  ]*current ar archive/\1/p' | xargs -d '\n' -I\{\} $STRIP -g \{\}" ARG0
+-- 
+2.21.0
+

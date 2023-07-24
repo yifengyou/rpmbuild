@@ -1,0 +1,109 @@
+From 0b1456ed4c00a021389acea4b6b10d475986b660 Mon Sep 17 00:00:00 2001
+Message-Id: <0b1456ed4c00a021389acea4b6b10d475986b660.1571920849.git.pmatilai@redhat.com>
+In-Reply-To: <6b6c4d881dc6fc99f949dac4aaf9a513542f9956.1571920849.git.pmatilai@redhat.com>
+References: <6b6c4d881dc6fc99f949dac4aaf9a513542f9956.1571920849.git.pmatilai@redhat.com>
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Thu, 4 Oct 2018 18:05:37 +0300
+Subject: [PATCH 4/5] Bump the minimum Python version requirement to 2.7
+
+Older Python versions are long since past their EOL, we don't need to
+support them either. Python 2.7 is also the least incompatible version
+compared to Python 3, going forward. Nuke the now unnecessary compat
+macros.
+
+(cherry picked from commit 3f3cb3eabf7bb49dcc6e691601f89500b3487e06)
+---
+ configure.ac          |  2 +-
+ python/header-py.c    |  4 ++--
+ python/rpmsystem-py.h | 33 ---------------------------------
+ python/spec-py.c      |  2 +-
+ 4 files changed, 4 insertions(+), 37 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 34ea85f9f..4d1a48e5f 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -800,7 +800,7 @@ esac],
+ 
+ WITH_PYTHON_SUBPACKAGE=0
+ AS_IF([test "$enable_python" = yes],[
+-  AM_PATH_PYTHON([2.6],[
++  AM_PATH_PYTHON([2.7],[
+     PKG_CHECK_MODULES([PYTHON], [python-${PYTHON_VERSION}], [WITH_PYTHON_SUBPACKAGE=1])
+     AC_SUBST(PYTHON_CFLAGS)
+     AC_SUBST(PYTHON_LIB)
+diff --git a/python/header-py.c b/python/header-py.c
+index 628b48534..c9d54e869 100644
+--- a/python/header-py.c
++++ b/python/header-py.c
+@@ -376,8 +376,8 @@ static PyObject *hdr_new(PyTypeObject *subtype, PyObject *args, PyObject *kwds)
+ 
+     if (obj == NULL) {
+ 	h = headerNew();
+-    } else if (CAPSULE_CHECK(obj)) {
+-	h = CAPSULE_EXTRACT(obj, "rpm._C_Header");
++    } else if (PyCapsule_CheckExact(obj)) {
++	h = PyCapsule_GetPointer(obj, "rpm._C_Header");
+ 	headerLink(h);
+     } else if (hdrObject_Check(obj)) {
+ 	h = headerCopy(((hdrObject*) obj)->h);
+diff --git a/python/rpmsystem-py.h b/python/rpmsystem-py.h
+index c8423e3dc..955d60cd3 100644
+--- a/python/rpmsystem-py.h
++++ b/python/rpmsystem-py.h
+@@ -9,39 +9,6 @@
+ #include <Python.h>
+ #include <structmember.h>
+ 
+-#if ((PY_MAJOR_VERSION << 8) | (PY_MINOR_VERSION << 0)) < 0x0205
+-typedef ssize_t Py_ssize_t;
+-typedef Py_ssize_t (*lenfunc)(PyObject *);
+-#endif  
+-
+-/* Compatibility macros for Python < 2.6 */
+-#ifndef PyVarObject_HEAD_INIT
+-#define PyVarObject_HEAD_INIT(type, size) \
+-	PyObject_HEAD_INIT(type) size,
+-#endif 
+-
+-#ifndef Py_TYPE
+-#define Py_TYPE(o) ((o)->ob_type)
+-#endif
+-
+-#if ((PY_MAJOR_VERSION << 8) | (PY_MINOR_VERSION << 0)) < 0x0206
+-#define PyBytes_Check PyString_Check
+-#define PyBytes_FromString PyString_FromString
+-#define PyBytes_FromStringAndSize PyString_FromStringAndSize
+-#define PyBytes_Size PyString_Size
+-#define PyBytes_AsString PyString_AsString
+-#endif
+-
+-#if ((PY_MAJOR_VERSION << 8) | (PY_MINOR_VERSION << 0)) >= 0x0207
+-#define CAPSULE_BUILD(ptr,name) PyCapsule_New(ptr, name, NULL)
+-#define CAPSULE_CHECK(obj) PyCapsule_CheckExact(obj)
+-#define CAPSULE_EXTRACT(obj,name) PyCapsule_GetPointer(obj, name)
+-#else
+-#define CAPSULE_BUILD(ptr,name) PyCObject_FromVoidPtr(ptr, NULL)
+-#define CAPSULE_CHECK(obj) PyCObject_Check(obj)
+-#define CAPSULE_EXTRACT(obj,name) PyCObject_AsVoidPtr(obj)
+-#endif
+-
+ /* For Python 3, use the PyLong type throughout in place of PyInt */
+ #if PY_MAJOR_VERSION >= 3
+ #define PyInt_Check PyLong_Check
+diff --git a/python/spec-py.c b/python/spec-py.c
+index fa7e58928..4efdbf4bf 100644
+--- a/python/spec-py.c
++++ b/python/spec-py.c
+@@ -34,7 +34,7 @@ static PyObject *makeHeader(Header h)
+     PyObject *rpmmod = PyImport_ImportModuleNoBlock("rpm");
+     if (rpmmod == NULL) return NULL;
+ 
+-    PyObject *ptr = CAPSULE_BUILD(h, "rpm._C_Header");
++    PyObject *ptr = PyCapsule_New(h, "rpm._C_Header", NULL);
+     PyObject *hdr = PyObject_CallMethod(rpmmod, "hdr", "(O)", ptr);
+     Py_XDECREF(ptr);
+     Py_XDECREF(rpmmod);
+-- 
+2.21.0
+

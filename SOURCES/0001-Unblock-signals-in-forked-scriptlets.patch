@@ -1,0 +1,37 @@
+From cb6aa82dbc10d554f8d234e934ae7c77e39a3ce2 Mon Sep 17 00:00:00 2001
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Tue, 12 Jan 2021 13:35:23 +0200
+Subject: [PATCH] Unblock signals in forked scriptlets
+
+Since commit c5f82d3f6223ebd0c5cc0a07ea60393ae7284929 we've blocked
+most signals during transactions, which makes sense to rpm itself but
+the signal mask is inherited to childs and carried even across exec(),
+so all scriptlets are executing with those signals blocked as well.
+Which in turn does not make sense, the scriptlets could run stuff that
+actually depends on signal delivery (such as SIGALARM in RhBug:1913765).
+
+Unblock all signals for forked scriptlet execution (Lua scriptlets are
+totally different as they execute in-process for now)
+---
+ lib/rpmscript.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/lib/rpmscript.c b/lib/rpmscript.c
+index 2ae3378f7..c69d29554 100644
+--- a/lib/rpmscript.c
++++ b/lib/rpmscript.c
+@@ -152,6 +152,11 @@ static void doScriptExec(ARGV_const_t argv, ARGV_const_t prefixes,
+ 			FD_t scriptFd, FD_t out)
+ {
+     int xx;
++    sigset_t set;
++
++    /* Unmask all signals, the scripts may need them */
++    sigfillset(&set);
++    sigprocmask(SIG_UNBLOCK, &set, NULL);
+ 
+     /* SIGPIPE is ignored in rpm, reset to default for the scriptlet */
+     (void) signal(SIGPIPE, SIG_DFL);
+-- 
+2.29.2
+

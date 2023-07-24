@@ -1,0 +1,53 @@
+From 6b6c4d881dc6fc99f949dac4aaf9a513542f9956 Mon Sep 17 00:00:00 2001
+Message-Id: <6b6c4d881dc6fc99f949dac4aaf9a513542f9956.1571920849.git.pmatilai@redhat.com>
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Wed, 3 Oct 2018 15:22:55 +0300
+Subject: [PATCH 1/5] Honor PYTHON from configure when running tests
+
+Pass PYTHON from configure down through all the nutty layers of make
+to allow running test-suite with Python 3. In theory that is.
+
+(cherry picked from commit dcd5ab67c40b543f22b07df8c1028c34b94a7929)
+---
+ tests/Makefile.am | 1 +
+ tests/atlocal.in  | 3 ++-
+ tests/local.at    | 2 +-
+ 3 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index eaf817cc2..21ca216a8 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -117,6 +117,7 @@ atlocal:	atlocal.in Makefile
+ 	  -e "s,[@]usrlibdir[@],$(libdir)," \
+ 	  -e "s,[@]execprefix[@],$(exec_prefix)," \
+ 	  -e "s,[@]RPMCONFIGDIR[@],$(rpmconfigdir)," \
++	  -e "s,[@]PYTHON[@],$(PYTHON)," \
+ 	< $(srcdir)/atlocal.in > atlocal
+ DISTCLEANFILES = atlocal
+ EXTRA_DIST += atlocal.in
+diff --git a/tests/atlocal.in b/tests/atlocal.in
+index d7d837f45..3b1474b56 100644
+--- rpm-4.14.3/tests/atlocal.in.orig	2020-04-28 14:19:26.866602968 +0200
++++ rpm-4.14.3/tests/atlocal.in	2020-04-28 14:21:07.977910054 +0200
+@@ -3,7 +3,8 @@
+ PATH="${abs_builddir}/testing@rpmbindir@:${abs_builddir}/testing@usrbindir@:$PATH"
+ export PATH
+ 
+-PYLIBDIR=`python2 -c "from distutils.sysconfig import get_python_lib; import sys; sys.stdout.write(get_python_lib(1,0,'@execprefix@'))"`
++PYTHON=@PYTHON@
++PYLIBDIR=$(${PYTHON} -c "from distutils.sysconfig import get_python_lib; import sys; sys.stdout.write(get_python_lib(1,0,'@execprefix@'))")
+ PYTHONPATH="${abs_builddir}/testing${PYLIBDIR}"
+ export PYTHONPATH
+ 
+--- rpm-4.14.3/tests/local.at.orig	2020-04-28 14:28:33.106664317 +0200
++++ rpm-4.14.3/tests/local.at	2020-04-28 14:29:02.064038653 +0200
+@@ -18,7 +18,7 @@
+     sys.stdout.write('%s\n' % msg)
+ $1
+ EOF
+-python2 test.py
++${PYTHON} test.py test.py
+ ]])
+ 
+ m4_define([RPMPY_CHECK],[

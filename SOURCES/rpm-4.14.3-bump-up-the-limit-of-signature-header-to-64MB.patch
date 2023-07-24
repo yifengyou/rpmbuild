@@ -1,0 +1,12 @@
+diff -up rpm-4.14.3/lib/header.c.orig rpm-4.14.3/lib/header.c
+--- rpm-4.14.3/lib/header.c.orig	2020-04-28 14:50:11.816399041 +0200
++++ rpm-4.14.3/lib/header.c	2021-02-03 16:47:23.567245743 +0100
+@@ -1910,7 +1910,7 @@ rpmRC hdrblobRead(FD_t fd, int magic, in
+ 
+     if (regionTag == RPMTAG_HEADERSIGNATURES) {
+ 	il_max = 32;
+-	dl_max = 8192;
++	dl_max = 64 * 1024 * 1024;
+     }
+ 
+     memset(block, 0, sizeof(block));

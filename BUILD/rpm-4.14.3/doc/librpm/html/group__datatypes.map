@@ -1,0 +1,6 @@
+<map id="Data types:" name="Data types:">
+<area shape="rect" id="node1" href="$group__rpmstrpool.html" title="How to store strings in pools." alt="" coords="179,5,300,31"/>
+<area shape="rect" id="node2" title=" " alt="" coords="5,55,103,80"/>
+<area shape="rect" id="node3" href="$group__rpmtypes.html" title="The abstract RPM data types." alt="" coords="176,55,303,80"/>
+<area shape="rect" id="node4" href="$group__rpmstring.html" title="String Manipulation API." alt="" coords="151,104,328,129"/>
+</map>
